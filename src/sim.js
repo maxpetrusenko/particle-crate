@@ -1,3 +1,5 @@
+import { createRenderer } from "./render.js";
+
 const canvas = document.querySelector("#sim");
 const ctx = canvas.getContext("2d");
 const bodyCount = document.querySelector("#bodyCount");
@@ -6,11 +8,14 @@ const gridCount = document.querySelector("#gridCount");
 const fps = document.querySelector("#fps");
 
 const palette = ["#ef455d", "#2dc49e", "#f1b43d", "#9862e5", "#50d2c8"];
+const wallStroke = 10;
+const wallMargin = 7;
 const config = {
-  density: 1080,
+  density: 900,
   gravity: 980,
   bounce: 0.08,
   friction: 0.42,
+  obstacleRadius: 56,
   showDiscs: false,
 };
 
@@ -25,9 +30,15 @@ const state = {
   scale: 1,
   world: { width: 1200, height: 820, floor: 720, left: 80, right: 1120 },
 };
+const render = createRenderer({ ctx, state, config, wallStroke, bodyCount, particleCount, gridCount, fps });
 
 const rand = (min, max) => min + Math.random() * (max - min);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const bounds = () => ({
+  left: state.world.left + wallStroke / 2 + wallMargin,
+  right: state.world.right - wallStroke / 2 - wallMargin,
+  floor: state.world.floor - wallStroke / 2 - wallMargin,
+});
 
 function resize() {
   const rect = canvas.getBoundingClientRect();
@@ -80,11 +91,12 @@ function makeBody(x, y, color) {
 function reset() {
   state.bodies = [];
   const count = config.density;
-  const pileTop = Math.max(190, state.world.floor - 430);
+  const bin = bounds();
+  const pileTop = Math.max(190, bin.floor - 430);
 
   for (let i = 0; i < count; i += 1) {
-    const x = rand(state.world.left + 42, state.world.right - 42);
-    const y = rand(pileTop, state.world.floor - 34);
+    const x = rand(bin.left + 36, bin.right - 36);
+    const y = rand(pileTop, bin.floor - 34);
     const color = palette[Math.floor(rand(0, palette.length))];
     state.bodies.push(makeBody(x, y, color));
   }
@@ -92,11 +104,17 @@ function reset() {
 
 function dropBatch(size = 120) {
   const start = state.bodies.length;
+  const bin = bounds();
   for (let i = 0; i < size; i += 1) {
-    const x = rand(state.world.left + 40, state.world.right - 40);
+    const x = rand(bin.left + 40, bin.right - 40);
     const y = rand(10, 130);
     state.bodies.push(makeBody(x, y, palette[(start + i) % palette.length]));
   }
+}
+
+function trimOverflow() {
+  if (state.bodies.length <= 1420) return;
+  state.bodies.splice(0, state.bodies.length - 1420);
 }
 
 function worldDisc(body, disc, bodyIndex) {
@@ -230,11 +248,12 @@ function collideParticles() {
 
 function collideWalls(body) {
   const bounce = config.bounce;
+  const bin = bounds();
   for (const disc of body.discs) {
     const p = worldDisc(body, disc, -1);
-    const floorOverlap = p.y + p.radius - state.world.floor;
-    const leftOverlap = state.world.left - (p.x - p.radius);
-    const rightOverlap = p.x + p.radius - state.world.right;
+    const floorOverlap = p.y + p.radius - bin.floor;
+    const leftOverlap = bin.left - (p.x - p.radius);
+    const rightOverlap = p.x + p.radius - bin.right;
 
     if (floorOverlap > 0) {
       body.y -= floorOverlap * 0.62;
@@ -255,19 +274,88 @@ function collideWalls(body) {
       body.vx = -Math.abs(body.vx) * bounce;
     }
   }
+  clampVisibleHull(body, bin);
 }
 
-function pointerForce(body, dt) {
-  if (!state.pointer) return;
-  const dx = body.x - state.pointer.x;
-  const dy = body.y - state.pointer.y;
-  const d2 = dx * dx + dy * dy;
-  if (d2 > 18000 || d2 < 1) return;
-  const force = (1 - d2 / 18000) * 2600 * dt;
-  const d = Math.sqrt(d2);
-  body.vx += (dx / d) * force;
-  body.vy += (dy / d) * force;
-  body.omega += clamp((state.pointer.vx * dy - state.pointer.vy * dx) * 0.0007, -5, 5);
+function collideObstacle(body) {
+  if (!state.pointer) return 0;
+  let hits = 0;
+
+  for (const disc of body.discs) {
+    const p = worldDisc(body, disc, -1);
+    const dx = p.x - state.pointer.x;
+    const dy = p.y - state.pointer.y;
+    const limit = disc.radius + config.obstacleRadius;
+    const d2 = dx * dx + dy * dy;
+    if (d2 <= 0.0001 || d2 > limit * limit) continue;
+
+    const dist = Math.sqrt(d2);
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const overlap = limit - dist;
+    body.x += nx * overlap * 0.72;
+    body.y += ny * overlap * 0.72;
+
+    const v = velocityAt(body, p.ox, p.oy);
+    const rvx = v.x - state.pointer.vx * 22;
+    const rvy = v.y - state.pointer.vy * 22;
+    const normalVelocity = rvx * nx + rvy * ny;
+    const rCrossN = p.ox * ny - p.oy * nx;
+    const normalMass = body.invMass + rCrossN * rCrossN * body.invInertia;
+
+    if (normalMass > 0) {
+      const j = Math.max(0, (-(1 + 0.18) * normalVelocity) / normalMass);
+      applyImpulse(body, p.ox, p.oy, j * nx, j * ny);
+      const tx = -ny;
+      const ty = nx;
+      const tangentVelocity = rvx * tx + rvy * ty;
+      const rCrossT = p.ox * ty - p.oy * tx;
+      const tangentMass = body.invMass + rCrossT * rCrossT * body.invInertia;
+      const jt = clamp(-tangentVelocity / tangentMass, -j * 0.55, j * 0.55);
+      applyImpulse(body, p.ox, p.oy, jt * tx, jt * ty);
+    }
+    body.omega += clamp((state.pointer.vx * ny - state.pointer.vy * nx) * 0.018, -3.6, 3.6);
+    hits += 1;
+  }
+
+  return hits;
+}
+
+function clampVisibleHull(body, bin) {
+  const cos = Math.cos(body.angle);
+  const sin = Math.sin(body.angle);
+  const corners = [
+    [-body.w / 2, -body.h / 2],
+    [body.w / 2, -body.h / 2],
+    [body.w / 2, body.h / 2],
+    [-body.w / 2, body.h / 2],
+  ];
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const [x, y] of corners) {
+    const wx = body.x + x * cos - y * sin;
+    const wy = body.y + x * sin + y * cos;
+    minX = Math.min(minX, wx);
+    maxX = Math.max(maxX, wx);
+    maxY = Math.max(maxY, wy);
+  }
+
+  if (minX < bin.left) {
+    body.x += bin.left - minX;
+    body.vx = Math.max(0, body.vx) * config.bounce;
+  }
+  if (maxX > bin.right) {
+    body.x -= maxX - bin.right;
+    body.vx = Math.min(0, body.vx) * config.bounce;
+  }
+  if (maxY > bin.floor) {
+    body.y -= maxY - bin.floor;
+    body.vy = Math.min(0, body.vy) * config.bounce;
+    body.vx *= 0.96;
+    body.omega *= 0.9;
+  }
 }
 
 function step(now) {
@@ -278,13 +366,13 @@ function step(now) {
 
   const gravity = config.gravity;
   state.dripClock += dt;
-  if (state.dripClock > 2.8 && state.bodies.length < 1320) {
+  if (state.dripClock > 0.72 && state.bodies.length < 1420) {
     state.dripClock = 0;
-    dropBatch(18);
+    dropBatch(12);
+    trimOverflow();
   }
 
   for (const body of state.bodies) {
-    pointerForce(body, dt);
     body.vy += gravity * dt;
     body.x += body.vx * dt;
     body.y += body.vy * dt;
@@ -298,69 +386,14 @@ function step(now) {
   for (let i = 0; i < 3; i += 1) {
     rebuildGrid();
     collideParticles();
+    for (const body of state.bodies) {
+      collideObstacle(body);
+      collideWalls(body);
+    }
   }
 
   render();
   requestAnimationFrame(step);
-}
-
-function roundRectPath(x, y, w, h, radius) {
-  const r = Math.min(radius, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
-function renderBody(body) {
-  ctx.save();
-  ctx.translate(body.x, body.y);
-  ctx.rotate(body.angle);
-  roundRectPath(-body.w / 2, -body.h / 2, body.w, body.h, 3);
-  ctx.fillStyle = body.color;
-  ctx.fill();
-  ctx.lineWidth = 2.4;
-  ctx.strokeStyle = "#06100d";
-  ctx.stroke();
-
-  if (config.showDiscs) {
-    ctx.globalAlpha = 0.55;
-    ctx.fillStyle = "#f7ffe8";
-    for (const disc of body.discs) {
-      ctx.beginPath();
-      ctx.arc(disc.ox, disc.oy, disc.radius, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-  ctx.restore();
-}
-
-function render() {
-  ctx.save();
-  ctx.scale(state.scale, state.scale);
-  ctx.clearRect(0, 0, state.world.width, state.world.height);
-  ctx.fillStyle = "#07110f";
-  ctx.fillRect(0, 0, state.world.width, state.world.height);
-
-  ctx.strokeStyle = "rgba(62, 153, 132, 0.75)";
-  ctx.lineWidth = 10;
-  ctx.beginPath();
-  ctx.moveTo(state.world.left, 170);
-  ctx.lineTo(state.world.left, state.world.floor);
-  ctx.lineTo(state.world.right, state.world.floor);
-  ctx.lineTo(state.world.right, 170);
-  ctx.stroke();
-
-  for (const body of state.bodies) renderBody(body);
-  ctx.restore();
-
-  bodyCount.textContent = `${state.bodies.length} bodies`;
-  particleCount.textContent = `${state.particles.length} discs`;
-  gridCount.textContent = `${state.grid.size} cells`;
-  fps.textContent = `${Math.round(state.fps)} fps`;
 }
 
 function canvasPoint(event) {
@@ -378,19 +411,24 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 
 canvas.addEventListener("pointermove", (event) => {
-  if (!state.pointer) return;
   const point = canvasPoint(event);
-  state.pointer.vx = point.x - state.pointer.x;
-  state.pointer.vy = point.y - state.pointer.y;
-  state.pointer.x = point.x;
-  state.pointer.y = point.y;
+  const previous = state.pointer;
+  state.pointer = {
+    ...point,
+    vx: previous ? point.x - previous.x : 0,
+    vy: previous ? point.y - previous.y : 0,
+  };
 });
 
 canvas.addEventListener("pointerup", () => {
-  state.pointer = null;
+  // Keep the hover obstacle active after drag release.
 });
 
 canvas.addEventListener("pointercancel", () => {
+  state.pointer = null;
+});
+
+canvas.addEventListener("pointerleave", () => {
   state.pointer = null;
 });
 
@@ -410,3 +448,49 @@ window.addEventListener("resize", () => {
 resize();
 reset();
 requestAnimationFrame(step);
+
+function bodyHull(body) {
+  const cos = Math.cos(body.angle);
+  const sin = Math.sin(body.angle);
+  const corners = [
+    [-body.w / 2, -body.h / 2],
+    [body.w / 2, -body.h / 2],
+    [body.w / 2, body.h / 2],
+    [-body.w / 2, body.h / 2],
+  ];
+  return corners.map(([x, y]) => ({
+    x: body.x + x * cos - y * sin,
+    y: body.y + x * sin + y * cos,
+  }));
+}
+
+window.__particleCrateDebug = {
+  setPointer(x, y, vx = 0, vy = 0) {
+    state.pointer = { x, y, vx, vy };
+  },
+  clearPointer() {
+    state.pointer = null;
+  },
+  checkContainment() {
+    const bin = bounds();
+    let leaks = 0;
+    let worst = 0;
+    for (const body of state.bodies) {
+      for (const point of bodyHull(body)) {
+        const over = Math.max(bin.left - point.x, point.x - bin.right, point.y - bin.floor, 0);
+        if (over > 0.75) leaks += 1;
+        worst = Math.max(worst, over);
+      }
+    }
+    return { bodies: state.bodies.length, leaks, worst: Number(worst.toFixed(2)), bounds: bin };
+  },
+  metrics() {
+    return {
+      bodies: state.bodies.length,
+      particles: state.particles.length,
+      cells: state.grid.size,
+      fps: Math.round(state.fps),
+      hasPointer: Boolean(state.pointer),
+    };
+  },
+};
