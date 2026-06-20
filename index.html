@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f4efe2" />
+    <title>Particle Crate</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="stage" aria-label="Compound disc rigid body simulation">
+        <canvas id="sim" width="1200" height="820"></canvas>
+        <div class="hud" aria-live="polite">
+          <strong id="bodyCount">0 bodies</strong>
+          <span id="particleCount">0 discs</span>
+          <span id="gridCount">0 cells</span>
+          <span id="fps">0 fps</span>
+        </div>
+        <div class="help">DRAG shove &nbsp; SPACE batch &nbsp; D discs &nbsp; R reset</div>
+      </section>
+    </main>
+
+    <script type="module" src="src/sim.js"></script>
+  </body>
+</html>

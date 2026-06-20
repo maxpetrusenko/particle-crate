@@ -1,0 +1,8 @@
+.codex/
+.claude/
+.cursor/
+.agents/
+.DS_Store
+node_modules/
+dist/
+coverage/
