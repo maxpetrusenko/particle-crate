@@ -1,4 +1,4 @@
-export function createRenderer({ ctx, state, config, wallStroke, bodyCount, particleCount, gridCount, fps }) {
+export function createRenderer({ ctx, state, config, wallStroke, bodyCount, particleCount, gridCount, fps, engineStatus, stepTime }) {
   function roundRectPath(x, y, w, h, radius) {
     const r = Math.min(radius, w / 2, h / 2);
     ctx.beginPath();
@@ -76,8 +76,10 @@ export function createRenderer({ ctx, state, config, wallStroke, bodyCount, part
     ctx.restore();
 
     bodyCount.textContent = `${state.bodies.length} bodies`;
-    particleCount.textContent = `${state.particles.length} discs`;
-    gridCount.textContent = `${state.grid.size} cells`;
+    particleCount.textContent = `${state.particles.length} ${state.engine.id === "rapier" ? "colliders" : "discs"}`;
+    gridCount.textContent = `${state.engine.id === "rapier" ? state.metrics.obstacleHits : state.grid.size} ${state.engine.id === "rapier" ? "cursor hits" : "cells"}`;
     fps.textContent = `${Math.round(state.fps)} fps`;
+    engineStatus.textContent = state.engine.label;
+    stepTime.textContent = `${state.metrics.stepMs.toFixed(1)} ms`;
   };
 }
