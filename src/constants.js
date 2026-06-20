@@ -1,6 +1,7 @@
 export const palette = ["#ef455d", "#2dc49e", "#f1b43d", "#9862e5", "#50d2c8"];
 export const wallStroke = 10;
 export const wallMargin = 7;
+export const crateTop = 170;
 
 export const config = {
   density: 900,

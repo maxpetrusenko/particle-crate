@@ -56,16 +56,23 @@ async function desktopProof(browser) {
   await page.evaluate(() => window.__particleCrateDebug.setPointer(620, 620, 22, -16));
   await page.waitForTimeout(900);
   const rapierPointer = await page.evaluate(() => window.__particleCrateDebug.metrics());
+  await page.evaluate(() => window.__particleCrateDebug.setPointer(1180, 40, 80, -80));
+  await page.waitForTimeout(1_200);
+  const rapierCrateTop = await page.evaluate(() => ({
+    metrics: window.__particleCrateDebug.metrics(),
+    containment: window.__particleCrateDebug.checkContainment(),
+  }));
 
   assert(errors.length === 0, `console errors: ${errors.join("; ")}`);
   assert(handmade.containment.leaks === 0, `handmade leaks: ${JSON.stringify(handmade.containment)}`);
   assert(rapier.containment.leaks === 0, `rapier leaks: ${JSON.stringify(rapier.containment)}`);
+  assert(rapierCrateTop.containment.leaks === 0, `rapier escaped top after outside pointer: ${JSON.stringify(rapierCrateTop.containment)}`);
   assert(handmadePointer.obstacleHits > 0, "handmade pointer did not hit bodies");
   assert(rapierPointer.obstacleHits > 0, "rapier pointer did not hit bodies");
   assert(rapier.metrics.stepMs < handmade.metrics.stepMs, "rapier baseline is not faster than handmade sample");
   await page.close();
 
-  return { handmade, handmadePointer, rapier, rapierPointer };
+  return { handmade, handmadePointer, rapier, rapierPointer, rapierCrateTop };
 }
 
 async function mobileProof(browser) {

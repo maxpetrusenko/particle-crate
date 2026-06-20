@@ -1,5 +1,6 @@
-import { config, palette, wallMargin, wallStroke } from "./constants.js";
+import { config, crateTop, palette, wallMargin, wallStroke } from "./constants.js";
 import { createHandmadeEngine } from "./engines/handmade.js";
+import { clamp } from "./math.js";
 import { createMetrics, sampleStep } from "./metrics.js";
 import { createRenderer } from "./render.js";
 
@@ -31,6 +32,7 @@ const render = createRenderer({
   state,
   config,
   wallStroke,
+  crateTop,
   bodyCount,
   particleCount,
   gridCount,
@@ -42,6 +44,7 @@ const render = createRenderer({
 const bounds = () => ({
   left: state.world.left + wallStroke / 2 + wallMargin,
   right: state.world.right - wallStroke / 2 - wallMargin,
+  top: crateTop + wallStroke / 2 + wallMargin,
   floor: state.world.floor - wallStroke / 2 - wallMargin,
 });
 
@@ -106,9 +109,18 @@ function step(now) {
 
 function canvasPoint(event) {
   const rect = canvas.getBoundingClientRect();
-  return {
+  return constrainPointer({
     x: (event.clientX - rect.left) / state.scale,
     y: (event.clientY - rect.top) / state.scale,
+  });
+}
+
+function constrainPointer(point) {
+  const bin = bounds();
+  const radius = config.obstacleRadius + 4;
+  return {
+    x: clamp(point.x, bin.left + radius, bin.right - radius),
+    y: clamp(point.y, bin.top + radius, bin.floor - radius),
   };
 }
 
@@ -193,7 +205,7 @@ async function compareEngines(sampleMs = 2500) {
 
 window.__particleCrateDebug = {
   setPointer(x, y, vx = 0, vy = 0) {
-    state.pointer = { x, y, vx, vy };
+    state.pointer = { ...constrainPointer({ x, y }), vx, vy };
   },
   clearPointer() {
     state.pointer = null;

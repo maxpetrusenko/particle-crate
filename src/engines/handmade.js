@@ -55,7 +55,7 @@ export function createHandmadeEngine({ state, config, palette, bounds }) {
     state.grid.clear();
     state.dripClock = 0;
     const bin = bounds();
-    const pileTop = Math.max(190, bin.floor - 430);
+    const pileTop = Math.max(bin.top + 30, bin.floor - 430);
 
     for (let i = 0; i < config.density; i += 1) {
       const x = rand(bin.left + 36, bin.right - 36);
@@ -69,7 +69,7 @@ export function createHandmadeEngine({ state, config, palette, bounds }) {
     const bin = bounds();
     for (let i = 0; i < size; i += 1) {
       const x = rand(bin.left + 40, bin.right - 40);
-      const y = rand(10, 130);
+      const y = rand(bin.top + 28, bin.top + 150);
       state.bodies.push(makeBody(x, y, palette[(start + i) % palette.length]));
     }
     trimOverflow();
@@ -218,9 +218,14 @@ export function createHandmadeEngine({ state, config, palette, bounds }) {
     for (const disc of body.discs) {
       const p = worldDisc(body, disc, -1);
       const floorOverlap = p.y + p.radius - bin.floor;
+      const topOverlap = bin.top - (p.y - p.radius);
       const leftOverlap = bin.left - (p.x - p.radius);
       const rightOverlap = p.x + p.radius - bin.right;
 
+      if (topOverlap > 0) {
+        body.y += topOverlap * 0.72;
+        body.vy = Math.abs(body.vy) * config.bounce;
+      }
       if (floorOverlap > 0) {
         body.y -= floorOverlap * 0.62;
         const v = velocityAt(body, p.ox, p.oy);
@@ -290,14 +295,20 @@ export function createHandmadeEngine({ state, config, palette, bounds }) {
   function clampVisibleHull(body, bin) {
     let minX = Infinity;
     let maxX = -Infinity;
+    let minY = Infinity;
     let maxY = -Infinity;
 
     for (const point of bodyHull(body)) {
       minX = Math.min(minX, point.x);
       maxX = Math.max(maxX, point.x);
+      minY = Math.min(minY, point.y);
       maxY = Math.max(maxY, point.y);
     }
 
+    if (minY < bin.top) {
+      body.y += bin.top - minY;
+      body.vy = Math.max(0, body.vy) * config.bounce;
+    }
     if (minX < bin.left) {
       body.x += bin.left - minX;
       body.vx = Math.max(0, body.vx) * config.bounce;
@@ -352,7 +363,7 @@ export function createHandmadeEngine({ state, config, palette, bounds }) {
     let worst = 0;
     for (const body of state.bodies) {
       for (const point of bodyHull(body)) {
-        const over = Math.max(bin.left - point.x, point.x - bin.right, point.y - bin.floor, 0);
+        const over = Math.max(bin.left - point.x, point.x - bin.right, bin.top - point.y, point.y - bin.floor, 0);
         if (over > 0.75) leaks += 1;
         worst = Math.max(worst, over);
       }

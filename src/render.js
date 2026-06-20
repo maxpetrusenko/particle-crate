@@ -1,4 +1,4 @@
-export function createRenderer({ ctx, state, config, wallStroke, bodyCount, particleCount, gridCount, fps, engineStatus, stepTime }) {
+export function createRenderer({ ctx, state, config, wallStroke, crateTop, bodyCount, particleCount, gridCount, fps, engineStatus, stepTime }) {
   function roundRectPath(x, y, w, h, radius) {
     const r = Math.min(radius, w / 2, h / 2);
     ctx.beginPath();
@@ -37,10 +37,10 @@ export function createRenderer({ ctx, state, config, wallStroke, bodyCount, part
     ctx.strokeStyle = `rgba(62, 153, 132, ${alpha})`;
     ctx.lineWidth = wallStroke;
     ctx.beginPath();
-    ctx.moveTo(state.world.left, 170);
+    ctx.moveTo(state.world.left, crateTop);
     ctx.lineTo(state.world.left, state.world.floor);
     ctx.lineTo(state.world.right, state.world.floor);
-    ctx.lineTo(state.world.right, 170);
+    ctx.lineTo(state.world.right, crateTop);
     ctx.stroke();
   }
 

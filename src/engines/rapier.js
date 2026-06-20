@@ -35,12 +35,17 @@ export async function createRapierEngine({ state, config, palette, bounds }) {
 
   function createStaticCrate() {
     const bin = bounds();
-    const top = 170;
     const thickness = 18;
-    const wallHeight = bin.floor - top + thickness;
-    const wallCenterY = top + wallHeight / 2;
+    const wallHeight = bin.floor - bin.top + thickness;
+    const wallCenterY = bin.top + wallHeight / 2;
     const crateWidth = bin.right - bin.left;
 
+    world.createCollider(
+      RAPIER.ColliderDesc.cuboid(crateWidth / 2, thickness / 2)
+        .setTranslation((bin.left + bin.right) / 2, bin.top - thickness / 2)
+        .setFriction(config.friction)
+        .setRestitution(config.bounce),
+    );
     world.createCollider(
       RAPIER.ColliderDesc.cuboid(crateWidth / 2, thickness / 2)
         .setTranslation((bin.left + bin.right) / 2, bin.floor + thickness / 2)
@@ -111,7 +116,7 @@ export async function createRapierEngine({ state, config, palette, bounds }) {
     state.grid.clear();
     state.dripClock = 0;
     const bin = bounds();
-    const pileTop = Math.max(190, bin.floor - 430);
+    const pileTop = Math.max(bin.top + 30, bin.floor - 430);
 
     for (let i = 0; i < config.density; i += 1) {
       const x = rand(bin.left + 36, bin.right - 36);
@@ -126,7 +131,7 @@ export async function createRapierEngine({ state, config, palette, bounds }) {
     const bin = bounds();
     for (let i = 0; i < size; i += 1) {
       const x = rand(bin.left + 40, bin.right - 40);
-      const y = rand(10, 130);
+      const y = rand(bin.top + 28, bin.top + 150);
       state.bodies.push(makeBody(x, y, palette[(start + i) % palette.length]));
     }
     trimOverflow();
@@ -179,11 +184,13 @@ export async function createRapierEngine({ state, config, palette, bounds }) {
   function clampVisibleHull(body, bin) {
     let minX = Infinity;
     let maxX = -Infinity;
+    let minY = Infinity;
     let maxY = -Infinity;
 
     for (const point of bodyHull(body)) {
       minX = Math.min(minX, point.x);
       maxX = Math.max(maxX, point.x);
+      minY = Math.min(minY, point.y);
       maxY = Math.max(maxY, point.y);
     }
 
@@ -191,12 +198,13 @@ export async function createRapierEngine({ state, config, palette, bounds }) {
     let dy = 0;
     if (minX < bin.left) dx = bin.left - minX;
     if (maxX > bin.right) dx = bin.right - maxX;
+    if (minY < bin.top) dy = bin.top - minY;
     if (maxY > bin.floor) dy = bin.floor - maxY;
     if (dx === 0 && dy === 0) return;
 
     body.rigid.setTranslation({ x: body.x + dx, y: body.y + dy }, true);
     const velocity = body.rigid.linvel();
-    body.rigid.setLinvel({ x: dx ? 0 : velocity.x * 0.96, y: dy ? Math.min(0, velocity.y) * config.bounce : velocity.y }, true);
+    body.rigid.setLinvel({ x: dx ? 0 : velocity.x * 0.96, y: dy ? 0 : velocity.y }, true);
     syncBody(body);
   }
 
@@ -232,7 +240,7 @@ export async function createRapierEngine({ state, config, palette, bounds }) {
     let worst = 0;
     for (const body of state.bodies) {
       for (const point of bodyHull(body)) {
-        const over = Math.max(bin.left - point.x, point.x - bin.right, point.y - bin.floor, 0);
+        const over = Math.max(bin.left - point.x, point.x - bin.right, bin.top - point.y, point.y - bin.floor, 0);
         if (over > 0.75) leaks += 1;
         worst = Math.max(worst, over);
       }
