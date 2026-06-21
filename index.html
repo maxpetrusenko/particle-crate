@@ -10,20 +10,27 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
+        }
+      }
+    </script>
   </head>
   <body>
     <main class="shell">
-      <section class="stage" aria-label="Compound disc rigid body simulation">
+      <section class="stage" aria-label="3D open crate particle simulation">
         <canvas id="sim" width="1200" height="820"></canvas>
         <div class="hud" aria-live="polite">
           <strong id="bodyCount">0 bodies</strong>
-          <span id="particleCount">0 discs</span>
-          <span id="gridCount">0 cells</span>
+          <span id="particleCount">0 selected</span>
+          <span id="gridCount">0 contacts</span>
           <span id="fps">0 fps</span>
-          <span id="engineStatus">JS discs</span>
+          <span id="engineStatus">3D crate</span>
           <span id="stepTime">0.0 ms</span>
         </div>
-        <div class="help">DRAG shove &nbsp; SPACE batch &nbsp; E engine &nbsp; D discs &nbsp; R reset</div>
       </section>
     </main>
 

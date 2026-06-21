@@ -1,7 +1,7 @@
 {
   "name": "particle-crate",
   "version": "1.0.0",
-  "description": "Browser physics lab comparing a handmade compound-disc solver against Rapier 2D.",
+  "description": "Browser 3D open-crate physics sketch with orbit and block-pull controls.",
   "private": true,
   "type": "module",
   "scripts": {
@@ -23,7 +23,8 @@
   },
   "homepage": "https://github.com/maxpetrusenko/particle-crate#readme",
   "dependencies": {
-    "@dimforge/rapier2d-compat": "0.19.3"
+    "@dimforge/rapier2d-compat": "0.19.3",
+    "three": "^0.184.0"
   },
   "devDependencies": {
     "playwright": "^1.61.0",

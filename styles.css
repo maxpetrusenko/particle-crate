@@ -32,22 +32,19 @@ body {
 
 .shell {
   width: 100%;
-  max-width: 1480px;
   min-height: 100svh;
-  margin-inline: auto;
-  padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+  margin: 0;
+  padding: 0;
   display: block;
 }
 
 .stage {
   min-width: 0;
-  min-height: calc(100svh - 28px);
+  min-height: 100svh;
+  height: 100svh;
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
   background: var(--field);
-  box-shadow: 0 22px 60px rgba(20, 23, 18, 0.16);
 }
 
 canvas {
@@ -74,17 +71,6 @@ canvas {
   pointer-events: none;
 }
 
-.help {
-  position: absolute;
-  inset: 41px auto auto 14px;
-  max-width: calc(100% - 28px);
-  color: rgba(234, 247, 238, 0.72);
-  font-family: "Space Mono", monospace;
-  font-size: 13px;
-  text-transform: uppercase;
-  pointer-events: none;
-}
-
 .hud span,
 .hud strong {
   text-shadow: 0 1px 0 #000;
@@ -93,12 +79,18 @@ canvas {
 @media (max-width: 900px) {
   .shell {
     min-height: auto;
-    padding-block: 10px;
   }
 
   .stage {
-    min-height: calc(100svh - 20px);
+    min-height: 100svh;
   }
+
+  .hud {
+    gap: 6px 10px;
+    font-size: 11px;
+    max-width: calc(100% - 24px);
+  }
+
 }
 
 @media (prefers-reduced-motion: reduce) {

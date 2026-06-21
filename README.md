@@ -1,18 +1,20 @@
 # Particle Crate
 
-Browser physics sketch inspired by the compound-disc rigid body pile in this X post:
+Browser physics sketch inspired by the rigid body pile in this X post:
 
 https://x.com/yacineMTB/status/2068358519460360637
 
-The demo now has two local physics modes:
+Stage 3 is a 3D open-crate scene:
 
-- `JS discs`: the original handmade compound-disc rigid body solver.
-- `Rapier WASM`: a real physics-engine baseline using vendored `@dimforge/rapier2d-compat` 0.19.3.
+- Orbit the camera with mouse/touch.
+- Drag a block to pull it through the crate.
+- Drop more blocks with Space.
+- Reset with R.
 
-Rapier source/docs:
+Three.js source/docs:
 
-- https://rapier.rs/docs/user_guides/javascript/getting_started_js
-- https://github.com/dimforge/rapier.js
+- https://threejs.org/
+- https://github.com/mrdoob/three.js
 
 ## Run
 
@@ -23,14 +25,14 @@ npm run dev -- --port 4173
 
 Then open `http://127.0.0.1:4173`.
 
-The app still works as static files on GitHub Pages. The Rapier bundle is vendored from the pinned npm package so the `E` engine toggle does not depend on a build server or CDN.
+The app still works as static files on GitHub Pages. Three.js and OrbitControls are vendored from the pinned npm package so the live site does not depend on a CDN or build server.
 
 ## Controls
 
-- Drag across the canvas to push bodies.
+- Drag empty space to orbit.
+- Wheel to zoom.
+- Drag a block to pull it.
 - Press Space to drop another batch.
-- Press E to switch between `JS discs` and `Rapier WASM`.
-- Press D to toggle the collision discs.
 - Press R to reset the crate.
 
 ## Verification
@@ -39,4 +41,4 @@ The app still works as static files on GitHub Pages. The Rapier bundle is vendor
 npm run check
 ```
 
-`npm run check` runs syntax checks, a production build, and headless browser QA over desktop and mobile viewports. The browser QA asserts no console errors, zero crate containment leaks, working pointer collisions in both engines, and a faster Rapier step sample than the handmade solver.
+`npm run check` runs syntax checks, a production build, and headless browser QA over desktop and mobile viewports. The browser QA asserts no console errors, a nonblank WebGL canvas, camera orbit, block pull interaction, and crate floor/side containment for bodies below wall height.
