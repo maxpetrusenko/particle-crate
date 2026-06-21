@@ -6,8 +6,8 @@ https://x.com/yacineMTB/status/2068358519460360637
 
 Stage 3 has two modes:
 
-- `3D`: visual open-crate scene with camera orbit, block pull, and floor-drag stirring.
-- `2D`: fast compound-disc crate mode with mouse shove controls.
+- `3D`: visual crate scene with camera orbit, block pull, floor-drag stirring, side containment, and sleep thresholds so settled blocks stop jittering.
+- `2D`: fast compound-disc open-crate mode with mouse shove controls. Pieces can clear the rim instead of bouncing off an invisible lid.
 - Drop more blocks with Space.
 - Reset with R.
 
@@ -41,4 +41,4 @@ The app still works as static files on GitHub Pages. Three.js and OrbitControls 
 npm run check
 ```
 
-`npm run check` runs syntax checks, a production build, and headless browser QA over desktop and mobile viewports. The browser QA asserts no console errors, a nonblank WebGL canvas, camera orbit, block pull, 3D floor stirring, 2D tab switching, 2D pointer shove, and crate containment.
+`npm run check` runs syntax checks, a production build, and headless browser QA over desktop and mobile viewports. The browser QA asserts no console errors, a nonblank WebGL canvas, camera orbit, block pull, 3D floor stirring, 3D containment and settling, 2D tab switching, 2D pointer shove, and 2D open-rim escape.

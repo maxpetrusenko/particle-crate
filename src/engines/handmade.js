@@ -218,15 +218,12 @@ export function createHandmadeEngine({ state, config, palette, bounds }) {
     for (const disc of body.discs) {
       const p = worldDisc(body, disc, -1);
       const floorOverlap = p.y + p.radius - bin.floor;
-      const topOverlap = bin.top - (p.y - p.radius);
       const leftOverlap = bin.left - (p.x - p.radius);
       const rightOverlap = p.x + p.radius - bin.right;
+      const withinWallY = p.y + p.radius > bin.top && p.y - p.radius < bin.floor;
+      const overFloorSegment = p.x + p.radius > bin.left && p.x - p.radius < bin.right;
 
-      if (topOverlap > 0) {
-        body.y += topOverlap * 0.72;
-        body.vy = Math.abs(body.vy) * config.bounce;
-      }
-      if (floorOverlap > 0) {
+      if (floorOverlap > 0 && overFloorSegment) {
         body.y -= floorOverlap * 0.62;
         const v = velocityAt(body, p.ox, p.oy);
         const raCrossN = p.ox;
@@ -236,16 +233,15 @@ export function createHandmadeEngine({ state, config, palette, bounds }) {
         const friction = clamp(v.x / denom, -impulse * config.friction, impulse * config.friction);
         applyImpulse(body, p.ox, p.oy, -friction, 0);
       }
-      if (leftOverlap > 0) {
+      if (leftOverlap > 0 && withinWallY) {
         body.x += leftOverlap;
         body.vx = Math.abs(body.vx) * config.bounce;
       }
-      if (rightOverlap > 0) {
+      if (rightOverlap > 0 && withinWallY) {
         body.x -= rightOverlap;
         body.vx = -Math.abs(body.vx) * config.bounce;
       }
     }
-    clampVisibleHull(body, bin);
   }
 
   function collideObstacle(body) {
@@ -290,39 +286,6 @@ export function createHandmadeEngine({ state, config, palette, bounds }) {
     }
 
     return hits;
-  }
-
-  function clampVisibleHull(body, bin) {
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-
-    for (const point of bodyHull(body)) {
-      minX = Math.min(minX, point.x);
-      maxX = Math.max(maxX, point.x);
-      minY = Math.min(minY, point.y);
-      maxY = Math.max(maxY, point.y);
-    }
-
-    if (minY < bin.top) {
-      body.y += bin.top - minY;
-      body.vy = Math.max(0, body.vy) * config.bounce;
-    }
-    if (minX < bin.left) {
-      body.x += bin.left - minX;
-      body.vx = Math.max(0, body.vx) * config.bounce;
-    }
-    if (maxX > bin.right) {
-      body.x -= maxX - bin.right;
-      body.vx = Math.min(0, body.vx) * config.bounce;
-    }
-    if (maxY > bin.floor) {
-      body.y -= maxY - bin.floor;
-      body.vy = Math.min(0, body.vy) * config.bounce;
-      body.vx *= 0.96;
-      body.omega *= 0.9;
-    }
   }
 
   function step(dt) {

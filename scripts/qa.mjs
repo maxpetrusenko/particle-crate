@@ -104,6 +104,8 @@ async function desktopProof(browser) {
   await page.waitForTimeout(1_200);
   const canvas2d = await canvasProof(page, "#sim2d");
   const push2d = await page.evaluate(() => window.__particleCrateDebug.push2dAt(620, 650, 26, -18));
+  const launched2d = await page.evaluate(() => window.__particleCrateDebug.launch2dOut());
+  const settled3d = await page.evaluate(() => window.__particleCrateDebug.settle3d(420));
 
   assert(errors.length === 0, `console errors: ${errors.join("; ")}`);
   assert(firstCanvas.width >= 1200 && firstCanvas.height >= 700, `canvas too small: ${JSON.stringify(firstCanvas)}`);
@@ -124,9 +126,12 @@ async function desktopProof(browser) {
   assert(push2d.bodies >= 180 && push2d.particles > push2d.bodies, `2D particles not running: ${JSON.stringify(push2d)}`);
   assert(push2d.obstacleHits > 0, `2D pointer shove did not hit bodies: ${JSON.stringify(push2d)}`);
   assert(push2d.leaks === 0, `2D containment leak: ${JSON.stringify(push2d)}`);
+  assert(launched2d.escaped > 0, `2D open crate did not let bodies leave: ${JSON.stringify(launched2d)}`);
+  assert(settled3d.escapedLow === 0, `3D bodies escaped through crate: ${JSON.stringify(settled3d)}`);
+  assert(settled3d.sleeping > 160, `3D did not settle enough: ${JSON.stringify(settled3d)}`);
   await page.close();
 
-  return { firstCanvas, secondCanvas, before, orbit, pulled, stirred, after, mode2d, canvas2d, push2d };
+  return { firstCanvas, secondCanvas, before, orbit, pulled, stirred, after, mode2d, canvas2d, push2d, launched2d, settled3d };
 }
 
 async function mobileProof(browser) {

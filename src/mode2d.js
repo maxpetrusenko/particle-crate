@@ -103,6 +103,11 @@ export function create2dMode({ canvas, hud }) {
     };
   }
 
+  function escapedCount() {
+    const bin = bounds();
+    return state.bodies.filter((body) => body.x < bin.left - body.w || body.x > bin.right + body.w || body.y < bin.top - body.h).length;
+  }
+
   canvas.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     canvas.setPointerCapture(event.pointerId);
@@ -139,6 +144,18 @@ export function create2dMode({ canvas, hud }) {
       setPointer({ x, y }, vx, vy);
       for (let i = 0; i < 40; i += 1) step(1 / 60);
       return metrics();
+    },
+    launchOut() {
+      const bin = bounds();
+      state.pointer = null;
+      const body = state.bodies[0];
+      body.x = bin.right - 8;
+      body.y = bin.top - 90;
+      body.vx = 1500;
+      body.vy = -620;
+      body.omega = 8;
+      for (let i = 0; i < 24; i += 1) step(1 / 60);
+      return { ...metrics(), escaped: escapedCount(), launched: [Number(body.x.toFixed(1)), Number(body.y.toFixed(1))] };
     },
   };
 }

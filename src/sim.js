@@ -167,11 +167,13 @@ function makeBody(index, highDrop = false) {
   scene.add(mesh);
 
   return {
+    id: index,
     mesh,
     size,
     velocity: new THREE.Vector3(rand(-0.7, 0.7), rand(-0.3, 0.3), rand(-0.5, 0.5)),
     angular: new THREE.Vector3(rand(-1.6, 1.6), rand(-1.2, 1.2), rand(-1.6, 1.6)),
     sleeping: false,
+    sleepFrames: 0,
   };
 }
 
@@ -378,6 +380,7 @@ function stepPhysics(dt) {
 }
 
 function applyDrag(body, dt) {
+  wake(body);
   scratch.copy(state.dragTarget).sub(body.mesh.position);
   const pull = scratch.multiplyScalar(18 * dt);
   body.velocity.add(pull);
@@ -393,6 +396,7 @@ function applyStir(body, dt) {
   const distance = Math.hypot(dx, dz);
   if (distance > radius || p.y > 2.4) return;
 
+  wake(body);
   state.stirHits += 1;
   state.stirEvents += 1;
   const falloff = 1 - distance / radius;
@@ -406,13 +410,35 @@ function applyStir(body, dt) {
 }
 
 function integrate(body, dt) {
+  if (body.sleeping) return;
   body.velocity.y -= world.gravity * dt;
-  body.velocity.multiplyScalar(body.mesh.position.y <= 0.28 ? 0.985 : 0.996);
+  body.velocity.multiplyScalar(body.mesh.position.y <= 0.32 ? 0.96 : 0.992);
   body.mesh.position.addScaledVector(body.velocity, dt);
   body.mesh.rotation.x += body.angular.x * dt;
   body.mesh.rotation.y += body.angular.y * dt;
   body.mesh.rotation.z += body.angular.z * dt;
-  body.angular.multiplyScalar(0.992);
+  body.angular.multiplyScalar(body.mesh.position.y <= 0.32 ? 0.94 : 0.985);
+  updateSleep(body);
+}
+
+function wake(body) {
+  body.sleeping = false;
+  body.sleepFrames = 0;
+}
+
+function updateSleep(body) {
+  const half = body.size.clone().multiplyScalar(0.5);
+  const onFloor = body.mesh.position.y - half.y <= world.floorY + 0.04;
+  const speed = body.velocity.length();
+  const spin = body.angular.length();
+  if (onFloor && speed < 0.28 && spin < 0.38) body.sleepFrames += 1;
+  else body.sleepFrames = 0;
+
+  if (body.sleepFrames > 20) {
+    body.velocity.set(0, 0, 0);
+    body.angular.set(0, 0, 0);
+    body.sleeping = true;
+  }
 }
 
 function collideCrate(body) {
@@ -427,29 +453,32 @@ function collideCrate(body) {
     body.angular.multiplyScalar(0.82);
   }
 
-  if (p.y - half.y > world.wallHeight) return;
-
   if (p.x - half.x < -world.halfX) {
     p.x = -world.halfX + half.x;
     body.velocity.x = Math.abs(body.velocity.x) * 0.2;
+    wake(body);
   }
   if (p.x + half.x > world.halfX) {
     p.x = world.halfX - half.x;
     body.velocity.x = -Math.abs(body.velocity.x) * 0.2;
+    wake(body);
   }
   if (p.z - half.z < -world.halfZ) {
     p.z = -world.halfZ + half.z;
     body.velocity.z = Math.abs(body.velocity.z) * 0.2;
+    wake(body);
   }
   if (p.z + half.z > world.halfZ) {
     p.z = world.halfZ - half.z;
     body.velocity.z = -Math.abs(body.velocity.z) * 0.2;
+    wake(body);
   }
 }
 
 function collideBodies() {
   const cellSize = 0.75;
   const grid = new Map();
+  const seen = new Set();
 
   for (const body of state.bodies) {
     const key = `${Math.floor(body.mesh.position.x / cellSize)}:${Math.floor(body.mesh.position.z / cellSize)}:${Math.floor(body.mesh.position.y / cellSize)}`;
@@ -457,10 +486,24 @@ function collideBodies() {
     grid.get(key).push(body);
   }
 
-  for (const bucket of grid.values()) {
-    for (let i = 0; i < bucket.length; i += 1) {
-      for (let j = i + 1; j < bucket.length; j += 1) {
-        collidePair(bucket[i], bucket[j]);
+  for (const [key, bucket] of grid.entries()) {
+    const [gx, gz, gy] = key.split(":").map(Number);
+    for (let oy = -1; oy <= 1; oy += 1) {
+      for (let oz = -1; oz <= 1; oz += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          const neighbor = grid.get(`${gx + ox}:${gz + oz}:${gy + oy}`);
+          if (!neighbor) continue;
+
+          for (const a of bucket) {
+            for (const b of neighbor) {
+              if (a.id >= b.id) continue;
+              const pairKey = `${a.id}:${b.id}`;
+              if (seen.has(pairKey)) continue;
+              seen.add(pairKey);
+              collidePair(a, b);
+            }
+          }
+        }
       }
     }
   }
@@ -491,6 +534,10 @@ function separate(a, b, nx, ny, nz, overlap) {
   const va = a.velocity.dot(scratch);
   const vb = b.velocity.dot(scratch);
   const impulse = (vb - va) * 0.34;
+  if (Math.abs(vb - va) > 0.22 || overlap > 0.24) {
+    wake(a);
+    wake(b);
+  }
   a.velocity.addScaledVector(scratch, impulse);
   b.velocity.addScaledVector(scratch, -impulse);
   a.angular.add(new THREE.Vector3(nz, nx, ny).multiplyScalar(0.04));
@@ -510,9 +557,9 @@ function sceneMetrics() {
   const positions = state.bodies.map((body) => body.mesh.position);
   const escapedLow = positions.filter((p, index) => {
     const half = state.bodies[index].size.clone().multiplyScalar(0.5);
-    if (p.y - half.y > world.wallHeight) return false;
     return p.x - half.x < -world.halfX - 0.02 || p.x + half.x > world.halfX + 0.02 || p.z - half.z < -world.halfZ - 0.02 || p.z + half.z > world.halfZ + 0.02 || p.y - half.y < world.floorY - 0.02;
   }).length;
+  const sleeping = state.bodies.filter((body) => body.sleeping).length;
   const avgY = positions.reduce((sum, p) => sum + p.y, 0) / positions.length;
   return {
     mode: "3d",
@@ -525,6 +572,7 @@ function sceneMetrics() {
     stirEvents: state.stirEvents,
     selected: Boolean(state.selected),
     stirring: state.stirring,
+    sleeping,
     camera: camera.position.toArray().map((value) => Number(value.toFixed(2))),
     firstBody: state.bodies[0].mesh.position.toArray().map((value) => Number(value.toFixed(2))),
     cameraMoved: state.cameraMoved,
@@ -582,6 +630,17 @@ window.__particleCrateDebug = {
   push2dAt(x = 600, y = 650, vx = 24, vy = -16) {
     setMode("2d");
     return mode2d.pushAt(x, y, vx, vy);
+  },
+  launch2dOut() {
+    setMode("2d");
+    return mode2d.launchOut();
+  },
+  settle3d(frames = 360) {
+    setMode("3d");
+    state.selected = null;
+    state.stirring = false;
+    for (let i = 0; i < frames; i += 1) stepPhysics(1 / 60);
+    return sceneMetrics();
   },
   sampleHeights() {
     return state.bodies.slice(0, 16).map((body) => Number(body.mesh.position.y.toFixed(2)));
