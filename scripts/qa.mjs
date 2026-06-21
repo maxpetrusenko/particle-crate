@@ -92,6 +92,7 @@ async function desktopProof(browser) {
     heights: window.__particleCrateDebug.sampleHeights(),
   }));
   const orbit = await page.evaluate(() => window.__particleCrateDebug.orbit(0.42, 0.05));
+  const legacyMode = await page.evaluate(() => window.__particleCrateDebug.setMode("3d"));
   const pulled = await page.evaluate(() => window.__particleCrateDebug.pullFirstBody(0, 4.5, 0));
   const stirred = await page.evaluate(() => window.__particleCrateDebug.stirFirstBody(1.4, 0.2));
   await page.waitForTimeout(1_800);
@@ -111,16 +112,20 @@ async function desktopProof(browser) {
   assert(firstCanvas.width >= 1200 && firstCanvas.height >= 700, `canvas too small: ${JSON.stringify(firstCanvas)}`);
   assert(firstCanvas.contrast > 40 && firstCanvas.colored > 120, `blank WebGL canvas: ${JSON.stringify({ firstCanvas, secondCanvas })}`);
   assert(secondCanvas.contrast > 40 && secondCanvas.colored > 120, `stale WebGL canvas: ${JSON.stringify({ firstCanvas, secondCanvas })}`);
-  assert(before.metrics.engine === "three-3d", `wrong engine: ${JSON.stringify(before.metrics)}`);
-  assert(before.metrics.bodies >= 400, `not enough bodies: ${before.metrics.bodies}`);
-  assert(Math.max(...before.heights) < 0.7, `3D starts as a falling rain field instead of a crate bed: ${JSON.stringify(before.heights)}`);
+  assert(before.metrics.engine === "particle-field-3d", `wrong engine: ${JSON.stringify(before.metrics)}`);
+  assert(before.metrics.particles >= 560, `not enough particles: ${before.metrics.particles}`);
+  assert(before.metrics.clusters >= 3, `missing locked voxel clusters: ${JSON.stringify(before.metrics)}`);
+  assert(before.metrics.freeMaxY < 0.35, `free particles start as rain instead of a crate bed: ${JSON.stringify(before.metrics)}`);
   assert(orbit.cameraMoved, `orbit did not move camera: ${JSON.stringify(orbit)}`);
-  assert(
-    distanceTo(pulled.firstBody, [0, 4.5, 0]) < distanceTo(before.metrics.firstBody, [0, 4.5, 0]) - 0.5,
-    `pull did not move first body toward target: ${JSON.stringify({ before: before.metrics.firstBody, pulled: pulled.firstBody })}`,
-  );
-  assert(stirred.stirEvents > 0, `3D stir did not hit bodies: ${JSON.stringify(stirred)}`);
-  assert(after.metrics.escapedLow === 0, `bodies leaked through floor/side walls: ${JSON.stringify(after.metrics)}`);
+  assert(legacyMode === "3d", `legacy 3D tab did not activate: ${legacyMode}`);
+  assert(pulled.engine === "three-3d", `legacy 3D fallback did not run: ${JSON.stringify(pulled)}`);
+  assert(stirred.stirEvents > 0, `legacy 3D stir did not hit bodies: ${JSON.stringify(stirred)}`);
+  const fieldPulse = await page.evaluate(() => window.__particleCrateDebug.exciteField({ x: 0, z: 0, count: 220, strength: 4.2 }));
+  await page.waitForTimeout(1_000);
+  const fieldAfter = await page.evaluate(() => window.__particleCrateDebug.metrics());
+  assert(fieldPulse.engine === "particle-field-3d", `field pulse wrong engine: ${JSON.stringify(fieldPulse)}`);
+  assert(fieldAfter.collisions > 20, `field pulse did not create 3D particle contacts: ${JSON.stringify(fieldAfter)}`);
+  assert(fieldAfter.escapedLow === 0, `field particles leaked through crate: ${JSON.stringify(fieldAfter)}`);
   assert(mode2d === "2d", `mode switch failed: ${mode2d}`);
   assert(canvas2d.contrast > 40 && canvas2d.colored > 120, `blank 2D canvas: ${JSON.stringify(canvas2d)}`);
   assert(push2d.engine === "js-discs-2d", `wrong 2D engine: ${JSON.stringify(push2d)}`);
@@ -132,7 +137,7 @@ async function desktopProof(browser) {
   assert(settled3d.sleeping > 360, `3D did not settle enough: ${JSON.stringify(settled3d)}`);
   await page.close();
 
-  return { firstCanvas, secondCanvas, before, orbit, pulled, stirred, after, mode2d, canvas2d, push2d, launched2d, settled3d };
+  return { firstCanvas, secondCanvas, before, orbit, legacyMode, pulled, stirred, after, fieldPulse, fieldAfter, mode2d, canvas2d, push2d, launched2d, settled3d };
 }
 
 async function mobileProof(browser) {

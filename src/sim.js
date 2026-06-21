@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { palette } from "./constants.js";
 import { clamp, rand } from "./math.js";
 import { create2dMode } from "./mode2d.js";
+import { createParticleField3D } from "./engines/particleField3d.js";
 
 const canvas = document.querySelector("#sim");
 const canvas2d = document.querySelector("#sim2d");
@@ -16,7 +17,7 @@ const engineStatus = document.querySelector("#engineStatus");
 const stepTime = document.querySelector("#stepTime");
 
 const app = {
-  mode: "3d",
+  mode: "field",
 };
 
 const world = {
@@ -100,12 +101,13 @@ const mode2d = create2dMode({
     stepTime,
   },
 });
+const particleField = createParticleField3D({ scene, palette, world });
 
 setupLights();
 setupCrate();
 reset();
 resize();
-setMode("3d");
+setMode("field");
 requestAnimationFrame(frame);
 
 function setupLights() {
@@ -211,6 +213,7 @@ function reset() {
   state.idleFrames = 0;
   stirCursor.visible = false;
   for (let i = 0; i < 420; i += 1) state.bodies.push(makeBody(i));
+  syncBodyVisibility();
 }
 
 function dropBatch(count = 80) {
@@ -247,10 +250,10 @@ function resize() {
 }
 
 function setMode(nextMode) {
-  app.mode = nextMode === "2d" ? "2d" : "3d";
+  app.mode = nextMode === "2d" ? "2d" : nextMode === "3d" ? "3d" : "field";
   stage.dataset.mode = app.mode;
   canvas2d.setAttribute("aria-hidden", app.mode === "2d" ? "false" : "true");
-  canvas.setAttribute("aria-hidden", app.mode === "3d" ? "false" : "true");
+  canvas.setAttribute("aria-hidden", app.mode !== "2d" ? "false" : "true");
   for (const tab of modeTabs) {
     const active = tab.dataset.mode === app.mode;
     tab.classList.toggle("is-active", active);
@@ -259,7 +262,9 @@ function setMode(nextMode) {
   state.selected = null;
   state.stirring = false;
   stirCursor.visible = false;
-  controls.enabled = app.mode === "3d";
+  controls.enabled = app.mode !== "2d";
+  syncBodyVisibility();
+  particleField.setVisible(app.mode === "field");
   if (app.mode === "2d") {
     mode2d.resize();
     mode2d.render();
@@ -267,6 +272,11 @@ function setMode(nextMode) {
     resize();
   }
   return app.mode;
+}
+
+function syncBodyVisibility() {
+  const visible = app.mode === "3d";
+  for (const body of state.bodies) body.mesh.visible = visible;
 }
 
 function pointerFromEvent(event) {
@@ -317,7 +327,22 @@ for (const tab of modeTabs) {
 }
 
 canvas.addEventListener("pointerdown", (event) => {
-  if (app.mode !== "3d") return;
+  if (app.mode === "2d") return;
+  if (app.mode === "field") {
+    const point = cratePointFromEvent(event);
+    if (!point) return;
+    event.preventDefault();
+    canvas.setPointerCapture(event.pointerId);
+    state.stirring = true;
+    state.selected = null;
+    controls.enabled = false;
+    state.stirTarget.copy(point);
+    state.stirPrevious.copy(point);
+    state.stirDelta.set(0, 0, 0);
+    stirCursor.position.copy(point);
+    stirCursor.visible = true;
+    return;
+  }
   const body = pickBody(event);
   if (!body) {
     const point = cratePointFromEvent(event);
@@ -345,18 +370,20 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 
 canvas.addEventListener("pointermove", (event) => {
-  if (app.mode !== "3d") return;
+  if (app.mode === "2d") return;
   if (!state.selected && !state.stirring) return;
   event.preventDefault();
   if (state.stirring) {
-    updateStirTarget(event);
+    if (updateStirTarget(event) && app.mode === "field") {
+      particleField.stir({ x: state.stirTarget.x, y: state.stirTarget.y, z: state.stirTarget.z, dx: state.stirDelta.x, dz: state.stirDelta.z });
+    }
     return;
   }
   updateDragTarget(event);
 });
 
 canvas.addEventListener("pointerup", (event) => {
-  if (app.mode !== "3d") return;
+  if (app.mode === "2d") return;
   if (!state.selected && !state.stirring) return;
   canvas.releasePointerCapture(event.pointerId);
   state.selected = null;
@@ -366,7 +393,7 @@ canvas.addEventListener("pointerup", (event) => {
 });
 
 canvas.addEventListener("pointercancel", () => {
-  if (app.mode !== "3d") return;
+  if (app.mode === "2d") return;
   state.selected = null;
   state.stirring = false;
   stirCursor.visible = false;
@@ -377,10 +404,12 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "Space") {
     event.preventDefault();
     if (app.mode === "2d") mode2d.dropBatch();
+    else if (app.mode === "field") particleField.excite();
     else dropBatch();
   }
   if (event.key.toLowerCase() === "r") {
     if (app.mode === "2d") mode2d.reset();
+    else if (app.mode === "field") particleField.reset();
     else reset();
   }
 });
@@ -394,6 +423,23 @@ function frame(now) {
   const dt = Math.min(clock.getDelta(), 0.026);
   if (app.mode === "2d") {
     mode2d.step(dt);
+    requestAnimationFrame(frame);
+    return;
+  }
+
+  if (app.mode === "field") {
+    const startedAt = performance.now();
+    if (state.stirring) {
+      particleField.stir({ x: state.stirTarget.x, y: state.stirTarget.y, z: state.stirTarget.z, dx: state.stirDelta.x, dz: state.stirDelta.z, strength: 0.72 });
+      state.stirDelta.multiplyScalar(0.68);
+    }
+    particleField.step(dt);
+    particleField.render();
+    controls.update();
+    renderer.render(scene, camera);
+    state.fps = state.fps * 0.92 + (1 / Math.max(dt, 0.001)) * 0.08;
+    state.stepMs = state.stepMs * 0.9 + (performance.now() - startedAt) * 0.1;
+    updateHud();
     requestAnimationFrame(frame);
     return;
   }
@@ -618,6 +664,16 @@ function separate(a, b, nx, ny, nz, overlap) {
 }
 
 function updateHud() {
+  if (app.mode === "field") {
+    const field = particleField.metrics();
+    bodyCount.textContent = `${field.particles} particles`;
+    particleCount.textContent = `${field.clusters} locked`;
+    gridCount.textContent = `${field.collisions} contacts`;
+    fpsEl.textContent = `${Math.round(state.fps)} fps`;
+    engineStatus.textContent = "Particle field";
+    stepTime.textContent = `${field.stepMs.toFixed(1)} ms`;
+    return;
+  }
   bodyCount.textContent = `${state.bodies.length} bodies`;
   particleCount.textContent = state.selected ? "1 pulled" : state.stirring ? `${state.stirHits} stirred` : "0 pulled";
   gridCount.textContent = `${state.contacts} contacts`;
@@ -657,19 +713,28 @@ function sceneMetrics() {
 
 window.__particleCrateDebug = {
   metrics() {
-    return app.mode === "2d" ? mode2d.metrics() : sceneMetrics();
+    return app.mode === "2d" ? mode2d.metrics() : app.mode === "field" ? particleField.metrics() : sceneMetrics();
   },
   setMode,
-  reset,
+  reset() {
+    if (app.mode === "2d") return mode2d.reset();
+    if (app.mode === "field") return particleField.reset();
+    reset();
+    return sceneMetrics();
+  },
   dropBatch,
   exciteBed,
+  exciteField(options) {
+    setMode("field");
+    return particleField.excite(options);
+  },
   orbit(deltaAzimuth = 0.35, deltaPolar = 0.08) {
     camera.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), deltaAzimuth);
     camera.position.y = clamp(camera.position.y + deltaPolar * 8, 3.2, 11);
     camera.lookAt(controls.target);
     controls.update();
     state.cameraMoved = true;
-    return sceneMetrics();
+    return { ...this.metrics(), cameraMoved: state.cameraMoved };
   },
   pullFirstBody(x = 0, y = 3.5, z = 0) {
     const body = state.bodies[0];
@@ -680,6 +745,9 @@ window.__particleCrateDebug = {
     return sceneMetrics();
   },
   stirAt(x = 0, z = 0, dx = 1.6, dz = 0) {
+    if (app.mode === "field") {
+      return particleField.stir({ x, z, dx, dz, strength: 1.4 });
+    }
     state.stirring = true;
     state.selected = null;
     state.stirEvents = 0;
@@ -718,6 +786,6 @@ window.__particleCrateDebug = {
     return sceneMetrics();
   },
   sampleHeights() {
-    return state.bodies.slice(0, 16).map((body) => Number(body.mesh.position.y.toFixed(2)));
+    return app.mode === "field" ? particleField.sampleHeights() : state.bodies.slice(0, 16).map((body) => Number(body.mesh.position.y.toFixed(2)));
   },
 };
