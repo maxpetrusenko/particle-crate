@@ -128,7 +128,7 @@ async function desktopProof(browser) {
   assert(push2d.leaks === 0, `2D containment leak: ${JSON.stringify(push2d)}`);
   assert(launched2d.escaped > 0, `2D open crate did not let bodies leave: ${JSON.stringify(launched2d)}`);
   assert(settled3d.escapedLow === 0, `3D bodies escaped through crate: ${JSON.stringify(settled3d)}`);
-  assert(settled3d.sleeping > 160, `3D did not settle enough: ${JSON.stringify(settled3d)}`);
+  assert(settled3d.sleeping > 360, `3D did not settle enough: ${JSON.stringify(settled3d)}`);
   await page.close();
 
   return { firstCanvas, secondCanvas, before, orbit, pulled, stirred, after, mode2d, canvas2d, push2d, launched2d, settled3d };

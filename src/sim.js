@@ -46,6 +46,7 @@ const state = {
   contacts: 0,
   stirHits: 0,
   stirEvents: 0,
+  idleFrames: 0,
   cameraMoved: false,
 };
 
@@ -183,6 +184,7 @@ function reset() {
   state.selected = null;
   state.stirring = false;
   state.stirEvents = 0;
+  state.idleFrames = 0;
   stirCursor.visible = false;
   for (let i = 0; i < 420; i += 1) state.bodies.push(makeBody(i));
 }
@@ -368,6 +370,8 @@ function frame(now) {
 function stepPhysics(dt) {
   state.contacts = 0;
   state.stirHits = 0;
+  if (state.selected || state.stirring) state.idleFrames = 0;
+  else state.idleFrames += 1;
   for (const body of state.bodies) {
     if (body === state.selected) applyDrag(body, dt);
     if (state.stirring) applyStir(body, dt);
@@ -377,6 +381,7 @@ function stepPhysics(dt) {
   if (state.stirring) state.stirDelta.multiplyScalar(0.72);
   collideBodies();
   for (const body of state.bodies) collideCrate(body);
+  applyIdleSettling();
 }
 
 function applyDrag(body, dt) {
@@ -427,17 +432,38 @@ function wake(body) {
 }
 
 function updateSleep(body) {
-  const half = body.size.clone().multiplyScalar(0.5);
-  const onFloor = body.mesh.position.y - half.y <= world.floorY + 0.04;
+  const insideSettledPile = body.mesh.position.y <= world.wallHeight + 0.7;
   const speed = body.velocity.length();
   const spin = body.angular.length();
-  if (onFloor && speed < 0.28 && spin < 0.38) body.sleepFrames += 1;
+  if (insideSettledPile && speed < 0.52 && spin < 0.72) body.sleepFrames += 1;
   else body.sleepFrames = 0;
 
-  if (body.sleepFrames > 20) {
+  if (body.sleepFrames > 16) {
     body.velocity.set(0, 0, 0);
     body.angular.set(0, 0, 0);
     body.sleeping = true;
+  }
+}
+
+function applyIdleSettling() {
+  if (state.idleFrames < 90) return;
+  for (const body of state.bodies) {
+    if (body.sleeping || body.mesh.position.y > world.wallHeight + 0.85) continue;
+    if (state.idleFrames > 240) {
+      body.velocity.set(0, 0, 0);
+      body.angular.set(0, 0, 0);
+      body.sleeping = true;
+      body.sleepFrames = 999;
+      continue;
+    }
+    const speed = body.velocity.length();
+    const spin = body.angular.length();
+    if (speed < 0.95 && spin < 1.2) {
+      body.velocity.multiplyScalar(0.35);
+      body.angular.multiplyScalar(0.25);
+      body.sleepFrames += 4;
+      updateSleep(body);
+    }
   }
 }
 
@@ -454,24 +480,28 @@ function collideCrate(body) {
   }
 
   if (p.x - half.x < -world.halfX) {
+    const impact = Math.abs(body.velocity.x);
     p.x = -world.halfX + half.x;
     body.velocity.x = Math.abs(body.velocity.x) * 0.2;
-    wake(body);
+    if (impact > 0.18) wake(body);
   }
   if (p.x + half.x > world.halfX) {
+    const impact = Math.abs(body.velocity.x);
     p.x = world.halfX - half.x;
     body.velocity.x = -Math.abs(body.velocity.x) * 0.2;
-    wake(body);
+    if (impact > 0.18) wake(body);
   }
   if (p.z - half.z < -world.halfZ) {
+    const impact = Math.abs(body.velocity.z);
     p.z = -world.halfZ + half.z;
     body.velocity.z = Math.abs(body.velocity.z) * 0.2;
-    wake(body);
+    if (impact > 0.18) wake(body);
   }
   if (p.z + half.z > world.halfZ) {
+    const impact = Math.abs(body.velocity.z);
     p.z = world.halfZ - half.z;
     body.velocity.z = -Math.abs(body.velocity.z) * 0.2;
-    wake(body);
+    if (impact > 0.18) wake(body);
   }
 }
 
@@ -510,6 +540,7 @@ function collideBodies() {
 }
 
 function collidePair(a, b) {
+  if (a.sleeping && b.sleeping) return;
   const pa = a.mesh.position;
   const pb = b.mesh.position;
   const dx = pb.x - pa.x;
@@ -527,6 +558,7 @@ function collidePair(a, b) {
 }
 
 function separate(a, b, nx, ny, nz, overlap) {
+  if ((a.sleeping || b.sleeping) && overlap < 0.08) return;
   const amount = overlap * 0.52;
   a.mesh.position.addScaledVector(scratch.set(nx, ny, nz), -amount);
   b.mesh.position.addScaledVector(scratch.set(nx, ny, nz), amount);
@@ -534,7 +566,7 @@ function separate(a, b, nx, ny, nz, overlap) {
   const va = a.velocity.dot(scratch);
   const vb = b.velocity.dot(scratch);
   const impulse = (vb - va) * 0.34;
-  if (Math.abs(vb - va) > 0.22 || overlap > 0.24) {
+  if (Math.abs(vb - va) > 0.34 || overlap > 0.3) {
     wake(a);
     wake(b);
   }
@@ -570,6 +602,7 @@ function sceneMetrics() {
     contacts: state.contacts,
     stirHits: state.stirHits,
     stirEvents: state.stirEvents,
+    idleFrames: state.idleFrames,
     selected: Boolean(state.selected),
     stirring: state.stirring,
     sleeping,
