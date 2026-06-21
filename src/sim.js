@@ -156,26 +156,50 @@ function addWall(x, y, z, sx, sy, sz) {
   scene.add(edges);
 }
 
-function makeBody(index, highDrop = false) {
+function makeBody(index, placement = "packed") {
   const wide = Math.random() > 0.32;
   const size = new THREE.Vector3(wide ? rand(0.48, 0.72) : rand(0.34, 0.48), rand(0.18, 0.34), wide ? rand(0.24, 0.38) : rand(0.42, 0.66));
   const mesh = new THREE.Mesh(boxGeometry, bodyMaterials[index % bodyMaterials.length]);
   mesh.scale.copy(size);
-  mesh.position.set(rand(-world.halfX + 0.7, world.halfX - 0.7), highDrop ? rand(4.2, 8.5) : rand(1.8, 5.2), rand(-world.halfZ + 0.65, world.halfZ - 0.65));
-  mesh.rotation.set(rand(-0.8, 0.8), rand(-Math.PI, Math.PI), rand(-0.8, 0.8));
+  placeBody(mesh, size, index, placement);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   scene.add(mesh);
+
+  const velocity = placement === "packed" ? new THREE.Vector3() : new THREE.Vector3(rand(-0.7, 0.7), rand(-0.3, 0.3), rand(-0.5, 0.5));
+  const angular = placement === "packed" ? new THREE.Vector3() : new THREE.Vector3(rand(-1.6, 1.6), rand(-1.2, 1.2), rand(-1.6, 1.6));
 
   return {
     id: index,
     mesh,
     size,
-    velocity: new THREE.Vector3(rand(-0.7, 0.7), rand(-0.3, 0.3), rand(-0.5, 0.5)),
-    angular: new THREE.Vector3(rand(-1.6, 1.6), rand(-1.2, 1.2), rand(-1.6, 1.6)),
-    sleeping: false,
-    sleepFrames: 0,
+    velocity,
+    angular,
+    sleeping: placement === "packed",
+    sleepFrames: placement === "packed" ? 999 : 0,
   };
+}
+
+function placeBody(mesh, size, index, placement) {
+  if (placement !== "packed") {
+    mesh.position.set(rand(-world.halfX + 0.7, world.halfX - 0.7), rand(2.0, 3.1), rand(-world.halfZ + 0.65, world.halfZ - 0.65));
+    mesh.rotation.set(rand(-0.45, 0.45), rand(-Math.PI, Math.PI), rand(-0.45, 0.45));
+    return;
+  }
+
+  const columns = 28;
+  const rows = 15;
+  const layer = Math.floor(index / (columns * rows));
+  const cell = index % (columns * rows);
+  const col = cell % columns;
+  const row = Math.floor(cell / columns);
+  const xSpan = world.halfX * 2 - 1.35;
+  const zSpan = world.halfZ * 2 - 1.25;
+  const x = -world.halfX + 0.68 + (col / (columns - 1)) * xSpan + rand(-0.08, 0.08);
+  const z = -world.halfZ + 0.64 + (row / (rows - 1)) * zSpan + rand(-0.08, 0.08);
+  const y = world.floorY + size.y * 0.5 + layer * 0.34 + rand(0, 0.04);
+  mesh.position.set(x, y, z);
+  mesh.rotation.set(rand(-0.12, 0.12), rand(-Math.PI, Math.PI), rand(-0.12, 0.12));
 }
 
 function reset() {
@@ -190,12 +214,29 @@ function reset() {
 }
 
 function dropBatch(count = 80) {
-  const start = state.bodies.length;
-  for (let i = 0; i < count; i += 1) state.bodies.push(makeBody(start + i, true));
-  while (state.bodies.length > world.limit) {
-    const removed = state.bodies.shift();
-    scene.remove(removed.mesh);
+  return exciteBed(count);
+}
+
+function exciteBed(count = 80, centerX = rand(-4.5, 4.5), centerZ = rand(-2.6, 2.6)) {
+  state.idleFrames = 0;
+  const candidates = state.bodies.filter((body) => body.mesh.position.y <= world.wallHeight + 0.7);
+  if (!candidates.length) return sceneMetrics();
+  for (let i = 0; i < count; i += 1) {
+    const body = candidates[Math.floor(Math.random() * candidates.length)];
+    const p = body.mesh.position;
+    const dx = p.x - centerX;
+    const dz = p.z - centerZ;
+    const distance = Math.max(0.001, Math.hypot(dx, dz));
+    const falloff = clamp(1 - distance / 7.5, 0.18, 1);
+    wake(body);
+    body.velocity.x += (dx / distance) * rand(3.5, 8.5) * falloff + rand(-1.2, 1.2);
+    body.velocity.z += (dz / distance) * rand(3.5, 8.5) * falloff + rand(-1.2, 1.2);
+    body.velocity.y += rand(1.2, 4.8) * falloff;
+    body.angular.x += rand(-5.5, 5.5) * falloff;
+    body.angular.y += rand(-2.5, 2.5) * falloff;
+    body.angular.z += rand(-5.5, 5.5) * falloff;
   }
+  return sceneMetrics();
 }
 
 function resize() {
@@ -397,9 +438,9 @@ function applyStir(body, dt) {
   const p = body.mesh.position;
   const dx = p.x - state.stirTarget.x;
   const dz = p.z - state.stirTarget.z;
-  const radius = 1.25;
+  const radius = 1.75;
   const distance = Math.hypot(dx, dz);
-  if (distance > radius || p.y > 2.4) return;
+  if (distance > radius || p.y > 2.8) return;
 
   wake(body);
   state.stirHits += 1;
@@ -407,11 +448,11 @@ function applyStir(body, dt) {
   const falloff = 1 - distance / radius;
   const nx = distance > 0.001 ? dx / distance : 0;
   const nz = distance > 0.001 ? dz / distance : 1;
-  body.velocity.x += nx * falloff * 18 * dt + state.stirDelta.x * falloff * 20;
-  body.velocity.z += nz * falloff * 18 * dt + state.stirDelta.z * falloff * 20;
-  body.velocity.y += falloff * 3.6 * dt;
-  body.angular.x += state.stirDelta.z * falloff * 2.6;
-  body.angular.z -= state.stirDelta.x * falloff * 2.6;
+  body.velocity.x += nx * falloff * 26 * dt + state.stirDelta.x * falloff * 34;
+  body.velocity.z += nz * falloff * 26 * dt + state.stirDelta.z * falloff * 34;
+  body.velocity.y += falloff * 6.4 * dt;
+  body.angular.x += state.stirDelta.z * falloff * 4.4;
+  body.angular.z -= state.stirDelta.x * falloff * 4.4;
 }
 
 function integrate(body, dt) {
@@ -621,6 +662,7 @@ window.__particleCrateDebug = {
   setMode,
   reset,
   dropBatch,
+  exciteBed,
   orbit(deltaAzimuth = 0.35, deltaPolar = 0.08) {
     camera.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), deltaAzimuth);
     camera.position.y = clamp(camera.position.y + deltaPolar * 8, 3.2, 11);

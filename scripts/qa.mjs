@@ -113,6 +113,7 @@ async function desktopProof(browser) {
   assert(secondCanvas.contrast > 40 && secondCanvas.colored > 120, `stale WebGL canvas: ${JSON.stringify({ firstCanvas, secondCanvas })}`);
   assert(before.metrics.engine === "three-3d", `wrong engine: ${JSON.stringify(before.metrics)}`);
   assert(before.metrics.bodies >= 400, `not enough bodies: ${before.metrics.bodies}`);
+  assert(Math.max(...before.heights) < 0.7, `3D starts as a falling rain field instead of a crate bed: ${JSON.stringify(before.heights)}`);
   assert(orbit.cameraMoved, `orbit did not move camera: ${JSON.stringify(orbit)}`);
   assert(
     distanceTo(pulled.firstBody, [0, 4.5, 0]) < distanceTo(before.metrics.firstBody, [0, 4.5, 0]) - 0.5,
