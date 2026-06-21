@@ -23,6 +23,7 @@
     <main class="shell">
       <section class="stage" aria-label="3D open crate particle simulation">
         <canvas id="sim" width="1200" height="820"></canvas>
+        <canvas id="sim2d" width="1200" height="820" aria-hidden="true"></canvas>
         <div class="hud" aria-live="polite">
           <strong id="bodyCount">0 bodies</strong>
           <span id="particleCount">0 selected</span>
@@ -30,6 +31,10 @@
           <span id="fps">0 fps</span>
           <span id="engineStatus">3D crate</span>
           <span id="stepTime">0.0 ms</span>
+        </div>
+        <div class="mode-tabs" aria-label="Simulation mode">
+          <button class="mode-tab is-active" type="button" data-mode="3d" aria-pressed="true">3D</button>
+          <button class="mode-tab" type="button" data-mode="2d" aria-pressed="false">2D</button>
         </div>
       </section>
     </main>

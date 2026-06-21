@@ -2,14 +2,22 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { palette } from "./constants.js";
 import { clamp, rand } from "./math.js";
+import { create2dMode } from "./mode2d.js";
 
 const canvas = document.querySelector("#sim");
+const canvas2d = document.querySelector("#sim2d");
+const stage = document.querySelector(".stage");
+const modeTabs = [...document.querySelectorAll(".mode-tab")];
 const bodyCount = document.querySelector("#bodyCount");
 const particleCount = document.querySelector("#particleCount");
 const gridCount = document.querySelector("#gridCount");
 const fpsEl = document.querySelector("#fps");
 const engineStatus = document.querySelector("#engineStatus");
 const stepTime = document.querySelector("#stepTime");
+
+const app = {
+  mode: "3d",
+};
 
 const world = {
   halfX: 9.4,
@@ -24,13 +32,20 @@ const world = {
 const state = {
   bodies: [],
   selected: null,
+  stirring: false,
   dragTarget: new THREE.Vector3(),
+  stirTarget: new THREE.Vector3(),
+  stirPrevious: new THREE.Vector3(),
+  stirDelta: new THREE.Vector3(),
   dragPlane: new THREE.Plane(new THREE.Vector3(0, 1, 0), 0),
+  floorPlane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.16),
   pointer: new THREE.Vector2(),
   lastTime: performance.now(),
   fps: 60,
   stepMs: 0,
   contacts: 0,
+  stirHits: 0,
+  stirEvents: 0,
   cameraMoved: false,
 };
 
@@ -63,16 +78,33 @@ const scratch = new THREE.Vector3();
 const clock = new THREE.Clock();
 
 const boxGeometry = new THREE.BoxGeometry(1, 1, 1);
+const stirGeometry = new THREE.SphereGeometry(0.28, 24, 12);
 const wallMaterial = new THREE.MeshStandardMaterial({ color: "#3e9984", roughness: 0.74, metalness: 0.06 });
 const floorMaterial = new THREE.MeshStandardMaterial({ color: "#0b1a16", roughness: 0.94, metalness: 0.02 });
-const pullMaterial = new THREE.MeshBasicMaterial({ color: "#f4efe2", transparent: true, opacity: 0.2, depthWrite: false });
+const pullMaterial = new THREE.MeshBasicMaterial({ color: "#f4efe2", transparent: true, opacity: 0.38, depthWrite: false });
 const edgeMaterial = new THREE.LineBasicMaterial({ color: "#0b1915", transparent: true, opacity: 0.72 });
 const bodyMaterials = palette.map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.62, metalness: 0.04 }));
+const stirCursor = new THREE.Mesh(stirGeometry, pullMaterial);
+stirCursor.visible = false;
+scene.add(stirCursor);
+
+const mode2d = create2dMode({
+  canvas: canvas2d,
+  hud: {
+    bodyCount,
+    particleCount,
+    gridCount,
+    fps: fpsEl,
+    engineStatus,
+    stepTime,
+  },
+});
 
 setupLights();
 setupCrate();
 reset();
 resize();
+setMode("3d");
 requestAnimationFrame(frame);
 
 function setupLights() {
@@ -147,6 +179,9 @@ function reset() {
   for (const body of state.bodies) scene.remove(body.mesh);
   state.bodies = [];
   state.selected = null;
+  state.stirring = false;
+  state.stirEvents = 0;
+  stirCursor.visible = false;
   for (let i = 0; i < 420; i += 1) state.bodies.push(makeBody(i));
 }
 
@@ -166,6 +201,29 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
+function setMode(nextMode) {
+  app.mode = nextMode === "2d" ? "2d" : "3d";
+  stage.dataset.mode = app.mode;
+  canvas2d.setAttribute("aria-hidden", app.mode === "2d" ? "false" : "true");
+  canvas.setAttribute("aria-hidden", app.mode === "3d" ? "false" : "true");
+  for (const tab of modeTabs) {
+    const active = tab.dataset.mode === app.mode;
+    tab.classList.toggle("is-active", active);
+    tab.setAttribute("aria-pressed", String(active));
+  }
+  state.selected = null;
+  state.stirring = false;
+  stirCursor.visible = false;
+  controls.enabled = app.mode === "3d";
+  if (app.mode === "2d") {
+    mode2d.resize();
+    mode2d.render();
+  } else {
+    resize();
+  }
+  return app.mode;
+}
+
 function pointerFromEvent(event) {
   const rect = canvas.getBoundingClientRect();
   state.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -181,6 +239,15 @@ function pickBody(event) {
   return state.bodies.find((body) => body.mesh === mesh) ?? null;
 }
 
+function cratePointFromEvent(event) {
+  pointerFromEvent(event);
+  raycaster.setFromCamera(state.pointer, camera);
+  if (!raycaster.ray.intersectPlane(state.floorPlane, pointerHit)) return null;
+  if (Math.abs(pointerHit.x) > world.halfX || Math.abs(pointerHit.z) > world.halfZ) return null;
+  pointerHit.y = 0.34;
+  return pointerHit.clone();
+}
+
 function updateDragTarget(event) {
   pointerFromEvent(event);
   raycaster.setFromCamera(state.pointer, camera);
@@ -189,47 +256,103 @@ function updateDragTarget(event) {
   state.dragTarget.y = clamp(state.dragTarget.y, 0.4, 5.2);
 }
 
+function updateStirTarget(event) {
+  const point = cratePointFromEvent(event);
+  if (!point) return false;
+  state.stirDelta.copy(point).sub(state.stirTarget);
+  state.stirPrevious.copy(state.stirTarget);
+  state.stirTarget.copy(point);
+  stirCursor.position.copy(point);
+  stirCursor.visible = true;
+  return true;
+}
+
+for (const tab of modeTabs) {
+  tab.addEventListener("click", () => setMode(tab.dataset.mode));
+}
+
 canvas.addEventListener("pointerdown", (event) => {
+  if (app.mode !== "3d") return;
   const body = pickBody(event);
-  if (!body) return;
+  if (!body) {
+    const point = cratePointFromEvent(event);
+    if (!point) return;
+    event.preventDefault();
+    canvas.setPointerCapture(event.pointerId);
+    state.stirring = true;
+    state.selected = null;
+    controls.enabled = false;
+    state.stirTarget.copy(point);
+    state.stirPrevious.copy(point);
+    state.stirDelta.set(0, 0, 0);
+    state.stirEvents = 0;
+    stirCursor.position.copy(point);
+    stirCursor.visible = true;
+    return;
+  }
   event.preventDefault();
   canvas.setPointerCapture(event.pointerId);
   state.selected = body;
+  state.stirring = false;
   controls.enabled = false;
   state.dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(scratch).normalize(), body.mesh.position);
   updateDragTarget(event);
 });
 
 canvas.addEventListener("pointermove", (event) => {
-  if (!state.selected) return;
+  if (app.mode !== "3d") return;
+  if (!state.selected && !state.stirring) return;
   event.preventDefault();
+  if (state.stirring) {
+    updateStirTarget(event);
+    return;
+  }
   updateDragTarget(event);
 });
 
 canvas.addEventListener("pointerup", (event) => {
-  if (!state.selected) return;
+  if (app.mode !== "3d") return;
+  if (!state.selected && !state.stirring) return;
   canvas.releasePointerCapture(event.pointerId);
   state.selected = null;
+  state.stirring = false;
+  stirCursor.visible = false;
   controls.enabled = true;
 });
 
 canvas.addEventListener("pointercancel", () => {
+  if (app.mode !== "3d") return;
   state.selected = null;
+  state.stirring = false;
+  stirCursor.visible = false;
   controls.enabled = true;
 });
 
 window.addEventListener("keydown", (event) => {
   if (event.code === "Space") {
     event.preventDefault();
-    dropBatch();
+    if (app.mode === "2d") mode2d.dropBatch();
+    else dropBatch();
   }
-  if (event.key.toLowerCase() === "r") reset();
+  if (event.key.toLowerCase() === "r") {
+    if (app.mode === "2d") mode2d.reset();
+    else reset();
+  }
 });
 
-window.addEventListener("resize", resize);
+window.addEventListener("resize", () => {
+  resize();
+  mode2d.resize();
+});
 
 function frame(now) {
   const dt = Math.min(clock.getDelta(), 0.026);
+  if (app.mode === "2d") {
+    mode2d.step(dt);
+    requestAnimationFrame(frame);
+    return;
+  }
+
   const startedAt = performance.now();
   stepPhysics(dt);
   controls.update();
@@ -242,11 +365,14 @@ function frame(now) {
 
 function stepPhysics(dt) {
   state.contacts = 0;
+  state.stirHits = 0;
   for (const body of state.bodies) {
     if (body === state.selected) applyDrag(body, dt);
+    if (state.stirring) applyStir(body, dt);
     integrate(body, dt);
     collideCrate(body);
   }
+  if (state.stirring) state.stirDelta.multiplyScalar(0.72);
   collideBodies();
   for (const body of state.bodies) collideCrate(body);
 }
@@ -257,6 +383,26 @@ function applyDrag(body, dt) {
   body.velocity.add(pull);
   body.velocity.multiplyScalar(0.9);
   body.angular.add(new THREE.Vector3(-scratch.z, 0, scratch.x).multiplyScalar(0.035));
+}
+
+function applyStir(body, dt) {
+  const p = body.mesh.position;
+  const dx = p.x - state.stirTarget.x;
+  const dz = p.z - state.stirTarget.z;
+  const radius = 1.25;
+  const distance = Math.hypot(dx, dz);
+  if (distance > radius || p.y > 2.4) return;
+
+  state.stirHits += 1;
+  state.stirEvents += 1;
+  const falloff = 1 - distance / radius;
+  const nx = distance > 0.001 ? dx / distance : 0;
+  const nz = distance > 0.001 ? dz / distance : 1;
+  body.velocity.x += nx * falloff * 18 * dt + state.stirDelta.x * falloff * 20;
+  body.velocity.z += nz * falloff * 18 * dt + state.stirDelta.z * falloff * 20;
+  body.velocity.y += falloff * 3.6 * dt;
+  body.angular.x += state.stirDelta.z * falloff * 2.6;
+  body.angular.z -= state.stirDelta.x * falloff * 2.6;
 }
 
 function integrate(body, dt) {
@@ -353,7 +499,7 @@ function separate(a, b, nx, ny, nz, overlap) {
 
 function updateHud() {
   bodyCount.textContent = `${state.bodies.length} bodies`;
-  particleCount.textContent = state.selected ? "1 pulled" : "0 pulled";
+  particleCount.textContent = state.selected ? "1 pulled" : state.stirring ? `${state.stirHits} stirred` : "0 pulled";
   gridCount.textContent = `${state.contacts} contacts`;
   fpsEl.textContent = `${Math.round(state.fps)} fps`;
   engineStatus.textContent = "Three.js 3D";
@@ -369,12 +515,16 @@ function sceneMetrics() {
   }).length;
   const avgY = positions.reduce((sum, p) => sum + p.y, 0) / positions.length;
   return {
+    mode: "3d",
     engine: "three-3d",
     bodies: state.bodies.length,
     fps: Math.round(state.fps),
     stepMs: Number(state.stepMs.toFixed(2)),
     contacts: state.contacts,
+    stirHits: state.stirHits,
+    stirEvents: state.stirEvents,
     selected: Boolean(state.selected),
+    stirring: state.stirring,
     camera: camera.position.toArray().map((value) => Number(value.toFixed(2))),
     firstBody: state.bodies[0].mesh.position.toArray().map((value) => Number(value.toFixed(2))),
     cameraMoved: state.cameraMoved,
@@ -384,7 +534,10 @@ function sceneMetrics() {
 }
 
 window.__particleCrateDebug = {
-  metrics: sceneMetrics,
+  metrics() {
+    return app.mode === "2d" ? mode2d.metrics() : sceneMetrics();
+  },
+  setMode,
   reset,
   dropBatch,
   orbit(deltaAzimuth = 0.35, deltaPolar = 0.08) {
@@ -402,6 +555,33 @@ window.__particleCrateDebug = {
     for (let i = 0; i < 44; i += 1) stepPhysics(1 / 60);
     state.selected = null;
     return sceneMetrics();
+  },
+  stirAt(x = 0, z = 0, dx = 1.6, dz = 0) {
+    state.stirring = true;
+    state.selected = null;
+    state.stirEvents = 0;
+    state.stirTarget.set(x, 0.34, z);
+    state.stirPrevious.copy(state.stirTarget);
+    stirCursor.visible = true;
+    stirCursor.position.copy(state.stirTarget);
+    for (let i = 0; i < 16; i += 1) {
+      state.stirDelta.set(dx / 16, 0, dz / 16);
+      state.stirTarget.x = clamp(state.stirTarget.x + state.stirDelta.x, -world.halfX + 0.4, world.halfX - 0.4);
+      state.stirTarget.z = clamp(state.stirTarget.z + state.stirDelta.z, -world.halfZ + 0.4, world.halfZ - 0.4);
+      stirCursor.position.copy(state.stirTarget);
+      stepPhysics(1 / 60);
+    }
+    state.stirring = false;
+    stirCursor.visible = false;
+    return sceneMetrics();
+  },
+  stirFirstBody(dx = 1.4, dz = 0.2) {
+    const body = state.bodies[0];
+    return this.stirAt(body.mesh.position.x, body.mesh.position.z, dx, dz);
+  },
+  push2dAt(x = 600, y = 650, vx = 24, vy = -16) {
+    setMode("2d");
+    return mode2d.pushAt(x, y, vx, vy);
   },
   sampleHeights() {
     return state.bodies.slice(0, 16).map((body) => Number(body.mesh.position.y.toFixed(2)));

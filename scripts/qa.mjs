@@ -50,9 +50,9 @@ async function loadPage(page, errors) {
   await page.waitForTimeout(1_400);
 }
 
-async function canvasProof(page) {
-  return page.evaluate(() => {
-    const canvas = document.querySelector("#sim");
+async function canvasProof(page, selector = "#sim") {
+  return page.evaluate((canvasSelector) => {
+    const canvas = document.querySelector(canvasSelector);
     const ctx = document.createElement("canvas").getContext("2d");
     const sample = 48;
     ctx.canvas.width = sample;
@@ -78,7 +78,7 @@ async function canvasProof(page) {
       contrast: max - min,
       ratio: lit / (sample * sample),
     };
-  });
+  }, selector);
 }
 
 async function desktopProof(browser) {
@@ -93,12 +93,17 @@ async function desktopProof(browser) {
   }));
   const orbit = await page.evaluate(() => window.__particleCrateDebug.orbit(0.42, 0.05));
   const pulled = await page.evaluate(() => window.__particleCrateDebug.pullFirstBody(0, 4.5, 0));
+  const stirred = await page.evaluate(() => window.__particleCrateDebug.stirFirstBody(1.4, 0.2));
   await page.waitForTimeout(1_800);
   const after = await page.evaluate(() => ({
     metrics: window.__particleCrateDebug.metrics(),
     heights: window.__particleCrateDebug.sampleHeights(),
   }));
   const secondCanvas = await canvasProof(page);
+  const mode2d = await page.evaluate(() => window.__particleCrateDebug.setMode("2d"));
+  await page.waitForTimeout(1_200);
+  const canvas2d = await canvasProof(page, "#sim2d");
+  const push2d = await page.evaluate(() => window.__particleCrateDebug.push2dAt(620, 650, 26, -18));
 
   assert(errors.length === 0, `console errors: ${errors.join("; ")}`);
   assert(firstCanvas.width >= 1200 && firstCanvas.height >= 700, `canvas too small: ${JSON.stringify(firstCanvas)}`);
@@ -111,10 +116,17 @@ async function desktopProof(browser) {
     distanceTo(pulled.firstBody, [0, 4.5, 0]) < distanceTo(before.metrics.firstBody, [0, 4.5, 0]) - 0.5,
     `pull did not move first body toward target: ${JSON.stringify({ before: before.metrics.firstBody, pulled: pulled.firstBody })}`,
   );
+  assert(stirred.stirEvents > 0, `3D stir did not hit bodies: ${JSON.stringify(stirred)}`);
   assert(after.metrics.escapedLow === 0, `bodies leaked through floor/side walls: ${JSON.stringify(after.metrics)}`);
+  assert(mode2d === "2d", `mode switch failed: ${mode2d}`);
+  assert(canvas2d.contrast > 40 && canvas2d.colored > 120, `blank 2D canvas: ${JSON.stringify(canvas2d)}`);
+  assert(push2d.engine === "js-discs-2d", `wrong 2D engine: ${JSON.stringify(push2d)}`);
+  assert(push2d.bodies >= 180 && push2d.particles > push2d.bodies, `2D particles not running: ${JSON.stringify(push2d)}`);
+  assert(push2d.obstacleHits > 0, `2D pointer shove did not hit bodies: ${JSON.stringify(push2d)}`);
+  assert(push2d.leaks === 0, `2D containment leak: ${JSON.stringify(push2d)}`);
   await page.close();
 
-  return { firstCanvas, secondCanvas, before, orbit, pulled, after };
+  return { firstCanvas, secondCanvas, before, orbit, pulled, stirred, after, mode2d, canvas2d, push2d };
 }
 
 async function mobileProof(browser) {

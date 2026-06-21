@@ -4,10 +4,10 @@ Browser physics sketch inspired by the rigid body pile in this X post:
 
 https://x.com/yacineMTB/status/2068358519460360637
 
-Stage 3 is a 3D open-crate scene:
+Stage 3 has two modes:
 
-- Orbit the camera with mouse/touch.
-- Drag a block to pull it through the crate.
+- `3D`: visual open-crate scene with camera orbit, block pull, and floor-drag stirring.
+- `2D`: fast compound-disc crate mode with mouse shove controls.
 - Drop more blocks with Space.
 - Reset with R.
 
@@ -29,9 +29,9 @@ The app still works as static files on GitHub Pages. Three.js and OrbitControls 
 
 ## Controls
 
-- Drag empty space to orbit.
-- Wheel to zoom.
-- Drag a block to pull it.
+- Use the `3D` / `2D` tabs to switch modes.
+- In `3D`, drag empty background to orbit, drag the crate floor to stir nearby blocks, drag a block to pull it, and wheel to zoom.
+- In `2D`, drag inside the crate to shove particles.
 - Press Space to drop another batch.
 - Press R to reset the crate.
 
@@ -41,4 +41,4 @@ The app still works as static files on GitHub Pages. Three.js and OrbitControls 
 npm run check
 ```
 
-`npm run check` runs syntax checks, a production build, and headless browser QA over desktop and mobile viewports. The browser QA asserts no console errors, a nonblank WebGL canvas, camera orbit, block pull interaction, and crate floor/side containment for bodies below wall height.
+`npm run check` runs syntax checks, a production build, and headless browser QA over desktop and mobile viewports. The browser QA asserts no console errors, a nonblank WebGL canvas, camera orbit, block pull, 3D floor stirring, 2D tab switching, 2D pointer shove, and crate containment.
