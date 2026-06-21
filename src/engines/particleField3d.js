@@ -38,6 +38,11 @@ export function createParticleField3D({ scene, palette, world }) {
     iterations: 2,
     exciteEvents: 0,
     stirHits: 0,
+    recycled: 0,
+    tiltX: 0,
+    tiltZ: 0,
+    wallOpen: false,
+    agitation: false,
     visible: true,
   };
 
@@ -50,6 +55,11 @@ export function createParticleField3D({ scene, palette, world }) {
     state.active = 0;
     state.exciteEvents = 0;
     state.stirHits = 0;
+    state.recycled = 0;
+    state.tiltX = 0;
+    state.tiltZ = 0;
+    state.wallOpen = false;
+    state.agitation = false;
     clusters.length = 0;
     addFreeBed();
     addVoxelCluster({ x: -2.8, y: 0.55, z: -0.6, columns: 4, rows: 4, layers: 4, colorIndex: 0, lockStrength: 0.34 });
@@ -132,10 +142,18 @@ export function createParticleField3D({ scene, palette, world }) {
       previous[base] = positions[base];
       previous[base + 1] = positions[base + 1];
       previous[base + 2] = positions[base + 2];
+      velocities[base] += state.tiltX * world.gravity * 0.34 * dt;
       velocities[base + 1] -= world.gravity * 0.42 * dt;
-      velocities[base] *= 0.992;
-      velocities[base + 1] *= 0.991;
-      velocities[base + 2] *= 0.992;
+      velocities[base + 2] += state.tiltZ * world.gravity * 0.34 * dt;
+      if (state.agitation && objectIds[i] < 0) {
+        velocities[base] += rand(-0.016, 0.016);
+        velocities[base + 1] += rand(0, 0.01);
+        velocities[base + 2] += rand(-0.016, 0.016);
+      }
+      const damping = state.agitation ? 0.994 : 0.992;
+      velocities[base] *= damping;
+      velocities[base + 1] *= state.agitation ? 0.992 : 0.991;
+      velocities[base + 2] *= damping;
       positions[base] += velocities[base] * dt;
       positions[base + 1] += velocities[base + 1] * dt;
       positions[base + 2] += velocities[base + 2] * dt;
@@ -244,19 +262,30 @@ export function createParticleField3D({ scene, palette, world }) {
 
   function constrainCrate(index) {
     const base = index * 3;
-    if (positions[base] < -world.halfX + radius) {
+    const x = positions[base];
+    const y = positions[base + 1];
+    const z = positions[base + 2];
+    const overRim = y > world.wallHeight + radius * 2;
+    const beyondSide = x < -world.halfX - radius || x > world.halfX + radius;
+    const beyondBack = z < -world.halfZ - radius;
+    const beyondFront = z > world.halfZ + radius;
+    const frontOpen = state.wallOpen || overRim || beyondFront;
+    const sideOpen = overRim || beyondSide;
+    const backOpen = overRim || beyondBack;
+
+    if (!sideOpen && positions[base] < -world.halfX + radius) {
       positions[base] = -world.halfX + radius;
       velocities[base] = Math.abs(velocities[base]) * 0.22;
     }
-    if (positions[base] > world.halfX - radius) {
+    if (!sideOpen && positions[base] > world.halfX - radius) {
       positions[base] = world.halfX - radius;
       velocities[base] = -Math.abs(velocities[base]) * 0.22;
     }
-    if (positions[base + 2] < -world.halfZ + radius) {
+    if (!backOpen && positions[base + 2] < -world.halfZ + radius) {
       positions[base + 2] = -world.halfZ + radius;
       velocities[base + 2] = Math.abs(velocities[base + 2]) * 0.22;
     }
-    if (positions[base + 2] > world.halfZ - radius) {
+    if (!frontOpen && positions[base + 2] > world.halfZ - radius) {
       positions[base + 2] = world.halfZ - radius;
       velocities[base + 2] = -Math.abs(velocities[base + 2]) * 0.22;
     }
@@ -266,6 +295,26 @@ export function createParticleField3D({ scene, palette, world }) {
       velocities[base] *= 0.82;
       velocities[base + 2] *= 0.82;
     }
+    const apronZ = world.halfZ + world.apronZ;
+    const apronX = world.halfX + world.apronX;
+    const backApronZ = -world.halfZ - world.apronX;
+    if (positions[base + 2] > apronZ || positions[base + 2] < backApronZ || Math.abs(positions[base]) > apronX || positions[base + 1] < world.floorY - 0.8) {
+      recycle(index);
+    }
+  }
+
+  function recycle(index) {
+    const base = index * 3;
+    positions[base] = rand(-world.halfX * 0.72, world.halfX * 0.72);
+    positions[base + 1] = world.floorY + radius + rand(0, 0.18);
+    positions[base + 2] = rand(-world.halfZ * 0.65, -world.halfZ * 0.05);
+    previous[base] = positions[base];
+    previous[base + 1] = positions[base + 1];
+    previous[base + 2] = positions[base + 2];
+    velocities[base] = rand(-0.18, 0.18);
+    velocities[base + 1] = rand(-0.02, 0.08);
+    velocities[base + 2] = rand(0.08, 0.42);
+    state.recycled += 1;
   }
 
   function excite({ x = 0, y = 0.2, z = 0, count = 180, strength = 3.4 } = {}) {
@@ -325,11 +374,36 @@ export function createParticleField3D({ scene, palette, world }) {
     mesh.visible = visible;
   }
 
+  function setTilt(x = 0, z = 0) {
+    state.tiltX = clamp(x, -1, 1);
+    state.tiltZ = clamp(z, -1, 1);
+    return metrics();
+  }
+
+  function setWallOpen(open = true) {
+    state.wallOpen = Boolean(open);
+    return metrics();
+  }
+
+  function setAgitation(enabled = true) {
+    state.agitation = Boolean(enabled);
+    return metrics();
+  }
+
+  function run(frames = 60) {
+    for (let i = 0; i < frames; i += 1) step(FIXED_DT);
+    render();
+    return metrics();
+  }
+
   function metrics() {
     let escapedLow = 0;
     let avgY = 0;
     let avgKE = 0;
     let freeMaxY = 0;
+    let overRim = 0;
+    let apron = 0;
+    let outside = 0;
     for (let i = 0; i < state.count; i += 1) {
       const base = i * 3;
       const x = positions[base];
@@ -338,7 +412,15 @@ export function createParticleField3D({ scene, palette, world }) {
       avgY += y;
       avgKE += kineticEnergy(i);
       if (objectIds[i] < 0) freeMaxY = Math.max(freeMaxY, y);
-      if (x < -world.halfX - 0.02 || x > world.halfX + 0.02 || z < -world.halfZ - 0.02 || z > world.halfZ + 0.02 || y < world.floorY - 0.02) escapedLow += 1;
+      if (y > world.wallHeight + radius * 2) overRim += 1;
+      const outsideCrate = Math.abs(x) > world.halfX + radius || z < -world.halfZ - radius || z > world.halfZ + radius;
+      if (outsideCrate) outside += 1;
+      if (z > world.halfZ + radius) apron += 1;
+      const inRecycleBounds = Math.abs(x) <= world.halfX + world.apronX + 0.02
+        && z <= world.halfZ + world.apronZ + 0.02
+        && z >= -world.halfZ - world.apronX - 0.02;
+      const belowFloor = y < world.floorY - 0.02;
+      if (!inRecycleBounds || belowFloor) escapedLow += 1;
     }
     return {
       mode: "field",
@@ -355,6 +437,13 @@ export function createParticleField3D({ scene, palette, world }) {
       iterations: state.iterations,
       stirHits: state.stirHits,
       exciteEvents: state.exciteEvents,
+      overRim,
+      apron,
+      outside,
+      recycled: state.recycled,
+      tilt: [Number(state.tiltX.toFixed(2)), Number(state.tiltZ.toFixed(2))],
+      wallOpen: state.wallOpen,
+      agitation: state.agitation,
       escapedLow,
     };
   }
@@ -385,6 +474,10 @@ export function createParticleField3D({ scene, palette, world }) {
     render,
     excite,
     stir,
+    setTilt,
+    setWallOpen,
+    setAgitation,
+    run,
     metrics,
     sampleHeights,
     setVisible,

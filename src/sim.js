@@ -28,6 +28,8 @@ const world = {
   wallThickness: 0.16,
   gravity: 18,
   limit: 560,
+  apronZ: 4.4,
+  apronX: 1.1,
 };
 
 const state = {
@@ -40,6 +42,7 @@ const state = {
   stirDelta: new THREE.Vector3(),
   dragPlane: new THREE.Plane(new THREE.Vector3(0, 1, 0), 0),
   floorPlane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.16),
+  fieldPlane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.85),
   pointer: new THREE.Vector2(),
   lastTime: performance.now(),
   fps: 60,
@@ -49,6 +52,10 @@ const state = {
   stirEvents: 0,
   idleFrames: 0,
   cameraMoved: false,
+  fieldTiltX: 0,
+  fieldTiltZ: 0,
+  fieldWallOpen: false,
+  fieldAgitation: false,
 };
 
 const scene = new THREE.Scene();
@@ -69,7 +76,7 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.075;
 controls.minDistance = 5.5;
 controls.maxDistance = 22;
-controls.maxPolarAngle = Math.PI * 0.49;
+controls.maxPolarAngle = Math.PI * 0.56;
 controls.addEventListener("change", () => {
   state.cameraMoved = true;
 });
@@ -89,6 +96,8 @@ const bodyMaterials = palette.map((color) => new THREE.MeshStandardMaterial({ co
 const stirCursor = new THREE.Mesh(stirGeometry, pullMaterial);
 stirCursor.visible = false;
 scene.add(stirCursor);
+let fieldFrontWall = null;
+let fieldFrontWallEdges = null;
 
 const mode2d = create2dMode({
   canvas: canvas2d,
@@ -137,7 +146,14 @@ function setupCrate() {
   addWall(-world.halfX - world.wallThickness / 2, world.wallHeight / 2, 0, world.wallThickness, world.wallHeight, world.halfZ * 2.08);
   addWall(world.halfX + world.wallThickness / 2, world.wallHeight / 2, 0, world.wallThickness, world.wallHeight, world.halfZ * 2.08);
   addWall(0, world.wallHeight / 2, -world.halfZ - world.wallThickness / 2, world.halfX * 2.08, world.wallHeight, world.wallThickness);
-  addWall(0, world.wallHeight / 2, world.halfZ + world.wallThickness / 2, world.halfX * 2.08, world.wallHeight, world.wallThickness);
+  const front = addWall(0, world.wallHeight / 2, world.halfZ + world.wallThickness / 2, world.halfX * 2.08, world.wallHeight, world.wallThickness);
+  fieldFrontWall = front.wall;
+  fieldFrontWallEdges = front.edges;
+
+  const apron = new THREE.Mesh(new THREE.BoxGeometry(world.halfX * 2.08, 0.08, world.apronZ), floorMaterial);
+  apron.position.set(0, -0.12, world.halfZ + world.apronZ / 2);
+  apron.receiveShadow = true;
+  scene.add(apron);
 
   const grid = new THREE.GridHelper(20, 20, "#2a695d", "#14372f");
   grid.position.y = 0.006;
@@ -156,6 +172,7 @@ function addWall(x, y, z, sx, sy, sz) {
   const edges = new THREE.LineSegments(new THREE.EdgesGeometry(wall.geometry), edgeMaterial);
   edges.position.copy(wall.position);
   scene.add(edges);
+  return { wall, edges };
 }
 
 function makeBody(index, placement = "packed") {
@@ -303,6 +320,16 @@ function cratePointFromEvent(event) {
   return pointerHit.clone();
 }
 
+function fieldPointFromEvent(event) {
+  pointerFromEvent(event);
+  raycaster.setFromCamera(state.pointer, camera);
+  if (!raycaster.ray.intersectPlane(state.fieldPlane, pointerHit)) return null;
+  pointerHit.x = clamp(pointerHit.x, -world.halfX - world.apronX, world.halfX + world.apronX);
+  pointerHit.z = clamp(pointerHit.z, -world.halfZ, world.halfZ + world.apronZ);
+  pointerHit.y = clamp(pointerHit.y, 0.25, 2.2);
+  return pointerHit.clone();
+}
+
 function updateDragTarget(event) {
   pointerFromEvent(event);
   raycaster.setFromCamera(state.pointer, camera);
@@ -312,7 +339,7 @@ function updateDragTarget(event) {
 }
 
 function updateStirTarget(event) {
-  const point = cratePointFromEvent(event);
+  const point = app.mode === "field" ? fieldPointFromEvent(event) : cratePointFromEvent(event);
   if (!point) return false;
   state.stirDelta.copy(point).sub(state.stirTarget);
   state.stirPrevious.copy(state.stirTarget);
@@ -322,6 +349,25 @@ function updateStirTarget(event) {
   return true;
 }
 
+function setFieldWallOpen(open) {
+  state.fieldWallOpen = Boolean(open);
+  particleField.setWallOpen(state.fieldWallOpen);
+  const y = state.fieldWallOpen ? 0.08 : world.wallHeight / 2;
+  if (fieldFrontWall) fieldFrontWall.position.y = y;
+  if (fieldFrontWallEdges) fieldFrontWallEdges.position.y = y;
+}
+
+function setFieldAgitation(enabled) {
+  state.fieldAgitation = Boolean(enabled);
+  particleField.setAgitation(state.fieldAgitation);
+}
+
+function setFieldTilt(x, z) {
+  state.fieldTiltX = clamp(x, -1, 1);
+  state.fieldTiltZ = clamp(z, -1, 1);
+  particleField.setTilt(state.fieldTiltX, state.fieldTiltZ);
+}
+
 for (const tab of modeTabs) {
   tab.addEventListener("click", () => setMode(tab.dataset.mode));
 }
@@ -329,7 +375,7 @@ for (const tab of modeTabs) {
 canvas.addEventListener("pointerdown", (event) => {
   if (app.mode === "2d") return;
   if (app.mode === "field") {
-    const point = cratePointFromEvent(event);
+    const point = fieldPointFromEvent(event);
     if (!point) return;
     event.preventDefault();
     canvas.setPointerCapture(event.pointerId);
@@ -401,15 +447,35 @@ canvas.addEventListener("pointercancel", () => {
 });
 
 window.addEventListener("keydown", (event) => {
+  const key = event.key.toLowerCase();
   if (event.code === "Space") {
     event.preventDefault();
     if (app.mode === "2d") mode2d.dropBatch();
-    else if (app.mode === "field") particleField.excite();
+    else if (app.mode === "field") particleField.excite({ x: state.stirTarget.x || 0, y: state.stirTarget.y || 0.8, z: state.stirTarget.z || 0, count: 220, strength: 4.2 });
     else dropBatch();
   }
-  if (event.key.toLowerCase() === "r") {
+  if (app.mode === "field" && key === "o") {
+    event.preventDefault();
+    setFieldWallOpen(!state.fieldWallOpen);
+  }
+  if (app.mode === "field" && key === "g") {
+    event.preventDefault();
+    setFieldAgitation(!state.fieldAgitation);
+  }
+  if (app.mode === "field" && ["arrowleft", "arrowright", "arrowup", "arrowdown", "a", "d", "w", "s"].includes(key)) {
+    event.preventDefault();
+    const dx = key === "arrowleft" || key === "a" ? -0.18 : key === "arrowright" || key === "d" ? 0.18 : 0;
+    const dz = key === "arrowup" || key === "w" ? -0.18 : key === "arrowdown" || key === "s" ? 0.18 : 0;
+    setFieldTilt(state.fieldTiltX + dx, state.fieldTiltZ + dz);
+  }
+  if (key === "r") {
     if (app.mode === "2d") mode2d.reset();
-    else if (app.mode === "field") particleField.reset();
+    else if (app.mode === "field") {
+      particleField.reset();
+      setFieldTilt(0, 0);
+      setFieldWallOpen(false);
+      setFieldAgitation(false);
+    }
     else reset();
   }
 });
@@ -667,11 +733,11 @@ function updateHud() {
   if (app.mode === "field") {
     const field = particleField.metrics();
     bodyCount.textContent = `${field.particles} particles`;
-    particleCount.textContent = `${field.clusters} locked`;
+    particleCount.textContent = `${field.active} active`;
     gridCount.textContent = `${field.collisions} contacts`;
     fpsEl.textContent = `${Math.round(state.fps)} fps`;
-    engineStatus.textContent = "Particle field";
-    stepTime.textContent = `${field.stepMs.toFixed(1)} ms`;
+    engineStatus.textContent = `${field.wallOpen ? "open" : "closed"} ${field.outside} out`;
+    stepTime.textContent = `${field.stepMs.toFixed(1)} ms ${field.avgKE.toFixed(2)} ke`;
     return;
   }
   bodyCount.textContent = `${state.bodies.length} bodies`;
@@ -718,7 +784,13 @@ window.__particleCrateDebug = {
   setMode,
   reset() {
     if (app.mode === "2d") return mode2d.reset();
-    if (app.mode === "field") return particleField.reset();
+    if (app.mode === "field") {
+      const result = particleField.reset();
+      setFieldTilt(0, 0);
+      setFieldWallOpen(false);
+      setFieldAgitation(false);
+      return result;
+    }
     reset();
     return sceneMetrics();
   },
@@ -727,6 +799,29 @@ window.__particleCrateDebug = {
   exciteField(options) {
     setMode("field");
     return particleField.excite(options);
+  },
+  stirFieldAt(options = {}) {
+    setMode("field");
+    return particleField.stir(options);
+  },
+  setFieldWallOpen(open = true) {
+    setMode("field");
+    setFieldWallOpen(open);
+    return particleField.metrics();
+  },
+  setFieldTilt(x = 0, z = 0) {
+    setMode("field");
+    setFieldTilt(x, z);
+    return particleField.metrics();
+  },
+  setFieldAgitation(enabled = true) {
+    setMode("field");
+    setFieldAgitation(enabled);
+    return particleField.metrics();
+  },
+  runField(frames = 90) {
+    setMode("field");
+    return particleField.run(frames);
   },
   orbit(deltaAzimuth = 0.35, deltaPolar = 0.08) {
     camera.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), deltaAzimuth);
