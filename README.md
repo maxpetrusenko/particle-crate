@@ -7,9 +7,9 @@ https://x.com/yacineMTB/status/2068699495102108131
 
 Stage 5 has three modes:
 
-- `FIELD`: default 3D particle-field sketch. Free crate material and locked voxel clusters are both represented as particles, rendered with `THREE.InstancedMesh`, stepped with a fixed timestep, uniform particle radius, grid neighbor search, sphere separation, finite-height crate walls, an outside apron, tilt gravity, recycle, and translation-only shape locks.
-- `3D`: visual crate scene with a packed in-crate bed, camera orbit, block pull, floor-drag stirring, side containment, and sleep thresholds so settled blocks stop jittering.
-- `2D`: fast compound-disc open-crate mode with mouse shove controls. Pieces can clear the rim instead of bouncing off an invisible lid.
+- `FIELD`: default 3D particle-field sketch. Free crate material and locked voxel clusters are both represented as particles, rendered with `THREE.InstancedMesh`, stepped with a fixed timestep, uniform particle radius, grid neighbor search, sphere separation, finite-height crate walls, an outside apron, tilt gravity, recycle, and translation-only shape locks. It stays frozen until user input injects energy.
+- `3D`: visual crate scene with a packed in-crate bed, camera orbit, block pull, floor-drag stirring, side containment, and sleep thresholds so settled blocks stop jittering. It starts asleep and only wakes touched blocks.
+- `2D`: fast compound-disc open-crate mode with mouse shove controls. Pieces can clear the rim instead of bouncing off an invisible lid. It does not drip or fall by itself.
 - Press Space to excite the packed bed from inside the crate.
 - Reset with R.
 
@@ -47,6 +47,6 @@ The app still works as static files on GitHub Pages. Three.js and OrbitControls 
 npm run check
 ```
 
-`npm run check` runs syntax checks, a production build, and headless browser QA over desktop and mobile viewports. The browser QA asserts no console errors, a nonblank WebGL canvas, default `FIELD` mode with free particles plus locked voxel clusters, low initial free-particle heights instead of falling-rain spawn, closed-wall containment, rim/outside field control, open-front spill to the apron, recycle, field settling, camera orbit, legacy 3D block pull/stir/settling, 2D tab switching, 2D pointer shove, and 2D open-rim escape.
+`npm run check` runs syntax checks, a production build, and headless browser QA over desktop and mobile viewports. The browser QA asserts no console errors, a nonblank WebGL canvas, default `FIELD` mode with free particles plus locked voxel clusters, low initial free-particle heights instead of falling-rain spawn, idle immobility before user input in `FIELD`, `3D`, and `2D`, closed-wall containment, rim/outside field control, open-front spill to the apron, recycle, field settling, camera orbit, legacy 3D block pull/stir/settling, 2D tab switching, 2D pointer shove, and 2D open-rim escape.
 
 The `FIELD` API design was reviewed through Hermes on maxiclaw using `claude -p --model opus`; the review recommended fixed timestep, fixed allocation, uniform particle radius, explicit metrics, and translation-only shape locks before rotation.

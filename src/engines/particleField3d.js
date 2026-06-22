@@ -43,23 +43,17 @@ export function createParticleField3D({ scene, palette, world }) {
     tiltZ: 0,
     wallOpen: false,
     agitation: false,
+    activeFrames: 0,
     visible: true,
   };
 
   reset();
 
   function reset() {
-    state.count = 0;
-    state.accumulator = 0;
-    state.collisions = 0;
-    state.active = 0;
-    state.exciteEvents = 0;
-    state.stirHits = 0;
-    state.recycled = 0;
-    state.tiltX = 0;
-    state.tiltZ = 0;
-    state.wallOpen = false;
-    state.agitation = false;
+    Object.assign(state, {
+      count: 0, accumulator: 0, collisions: 0, active: 0, exciteEvents: 0, stirHits: 0,
+      recycled: 0, tiltX: 0, tiltZ: 0, wallOpen: false, agitation: false, activeFrames: 0,
+    });
     clusters.length = 0;
     addFreeBed();
     addVoxelCluster({ x: -2.8, y: 0.55, z: -0.6, columns: 4, rows: 4, layers: 4, colorIndex: 0, lockStrength: 0.34 });
@@ -124,6 +118,11 @@ export function createParticleField3D({ scene, palette, world }) {
 
   function step(dt) {
     const startedAt = performance.now();
+    if (!isDriven()) {
+      freeze();
+      state.stepMs *= 0.86;
+      return;
+    }
     state.accumulator += Math.min(dt, 0.05);
     let ran = 0;
     while (state.accumulator >= FIXED_DT && ran < state.substeps) {
@@ -131,7 +130,27 @@ export function createParticleField3D({ scene, palette, world }) {
       state.accumulator -= FIXED_DT;
       ran += 1;
     }
+    if (state.activeFrames > 0 && !state.agitation && Math.abs(state.tiltX) < 0.001 && Math.abs(state.tiltZ) < 0.001) {
+      state.activeFrames = Math.max(0, state.activeFrames - ran);
+      if (state.activeFrames === 0) freeze();
+    }
     state.stepMs = state.stepMs * 0.86 + (performance.now() - startedAt) * 0.14;
+  }
+
+  function isDriven() {
+    return state.activeFrames > 0 || state.agitation || Math.abs(state.tiltX) > 0.001 || Math.abs(state.tiltZ) > 0.001;
+  }
+
+  function activate(frames = 180) {
+    state.activeFrames = Math.max(state.activeFrames, frames);
+  }
+
+  function freeze() {
+    velocities.fill(0);
+    previous.set(positions);
+    state.active = 0;
+    state.collisions = 0;
+    state.accumulator = 0;
   }
 
   function substep(dt) {
@@ -319,6 +338,7 @@ export function createParticleField3D({ scene, palette, world }) {
 
   function excite({ x = 0, y = 0.2, z = 0, count = 180, strength = 3.4 } = {}) {
     state.exciteEvents += 1;
+    activate(220);
     for (let i = 0; i < count; i += 1) {
       const index = Math.floor(Math.random() * state.count);
       impulse(index, x, y, z, strength * rand(0.65, 1.35));
@@ -328,6 +348,7 @@ export function createParticleField3D({ scene, palette, world }) {
 
   function stir({ x = 0, y = 0.25, z = 0, dx = 0, dz = 0, strength = 1 } = {}) {
     state.stirHits = 0;
+    activate(160);
     for (let i = 0; i < state.count; i += 1) {
       const base = i * 3;
       const px = positions[base] - x;
@@ -377,6 +398,8 @@ export function createParticleField3D({ scene, palette, world }) {
   function setTilt(x = 0, z = 0) {
     state.tiltX = clamp(x, -1, 1);
     state.tiltZ = clamp(z, -1, 1);
+    if (Math.abs(state.tiltX) > 0.001 || Math.abs(state.tiltZ) > 0.001) activate(260);
+    else if (!state.agitation) freeze();
     return metrics();
   }
 
@@ -387,6 +410,8 @@ export function createParticleField3D({ scene, palette, world }) {
 
   function setAgitation(enabled = true) {
     state.agitation = Boolean(enabled);
+    if (state.agitation) activate(260);
+    else if (Math.abs(state.tiltX) < 0.001 && Math.abs(state.tiltZ) < 0.001) freeze();
     return metrics();
   }
 
@@ -423,33 +448,25 @@ export function createParticleField3D({ scene, palette, world }) {
       if (!inRecycleBounds || belowFloor) escapedLow += 1;
     }
     return {
-      mode: "field",
-      engine: "particle-field-3d",
-      particles: state.count,
-      active: state.active,
-      clusters: clusters.length,
-      collisions: state.collisions,
-      avgY: Number((avgY / state.count).toFixed(3)),
-      avgKE: Number((avgKE / state.count).toFixed(4)),
-      freeMaxY: Number(freeMaxY.toFixed(3)),
-      stepMs: Number(state.stepMs.toFixed(2)),
-      substeps: state.substeps,
-      iterations: state.iterations,
-      stirHits: state.stirHits,
-      exciteEvents: state.exciteEvents,
-      overRim,
-      apron,
-      outside,
-      recycled: state.recycled,
-      tilt: [Number(state.tiltX.toFixed(2)), Number(state.tiltZ.toFixed(2))],
-      wallOpen: state.wallOpen,
-      agitation: state.agitation,
-      escapedLow,
+      mode: "field", engine: "particle-field-3d", particles: state.count, active: state.active,
+      clusters: clusters.length, collisions: state.collisions, avgY: Number((avgY / state.count).toFixed(3)),
+      avgKE: Number((avgKE / state.count).toFixed(4)), freeMaxY: Number(freeMaxY.toFixed(3)),
+      stepMs: Number(state.stepMs.toFixed(2)), substeps: state.substeps, iterations: state.iterations,
+      stirHits: state.stirHits, exciteEvents: state.exciteEvents, overRim, apron, outside,
+      recycled: state.recycled, tilt: [Number(state.tiltX.toFixed(2)), Number(state.tiltZ.toFixed(2))],
+      wallOpen: state.wallOpen, agitation: state.agitation, driven: isDriven(), activeFrames: state.activeFrames, escapedLow,
     };
   }
 
   function sampleHeights() {
     return Array.from({ length: Math.min(16, state.count) }, (_, i) => Number(positions[i * 3 + 1].toFixed(2)));
+  }
+
+  function samplePositions(limit = 16) {
+    return Array.from({ length: Math.min(limit, state.count) }, (_, i) => {
+      const base = i * 3;
+      return [Number(positions[base].toFixed(3)), Number(positions[base + 1].toFixed(3)), Number(positions[base + 2].toFixed(3))];
+    });
   }
 
   function kineticEnergy(index) {
@@ -468,18 +485,5 @@ export function createParticleField3D({ scene, palette, world }) {
     array[base + 2] = z;
   }
 
-  return {
-    reset,
-    step,
-    render,
-    excite,
-    stir,
-    setTilt,
-    setWallOpen,
-    setAgitation,
-    run,
-    metrics,
-    sampleHeights,
-    setVisible,
-  };
+  return { reset, step, render, excite, stir, setTilt, setWallOpen, setAgitation, run, metrics, sampleHeights, samplePositions, setVisible };
 }

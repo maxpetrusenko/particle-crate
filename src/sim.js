@@ -823,6 +823,18 @@ window.__particleCrateDebug = {
     setMode("field");
     return particleField.run(frames);
   },
+  sampleFieldPositions(limit = 16) {
+    setMode("field");
+    return particleField.samplePositions(limit);
+  },
+  run2d(frames = 60) {
+    setMode("2d");
+    return mode2d.run(frames);
+  },
+  sample2dPositions(limit = 16) {
+    setMode("2d");
+    return mode2d.samplePositions(limit);
+  },
   orbit(deltaAzimuth = 0.35, deltaPolar = 0.08) {
     camera.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), deltaAzimuth);
     camera.position.y = clamp(camera.position.y + deltaPolar * 8, 3.2, 11);
@@ -882,5 +894,13 @@ window.__particleCrateDebug = {
   },
   sampleHeights() {
     return app.mode === "field" ? particleField.sampleHeights() : state.bodies.slice(0, 16).map((body) => Number(body.mesh.position.y.toFixed(2)));
+  },
+  sample3dPositions(limit = 16) {
+    setMode("3d");
+    return state.bodies.slice(0, limit).map((body) => [
+      Number(body.mesh.position.x.toFixed(3)),
+      Number(body.mesh.position.y.toFixed(3)),
+      Number(body.mesh.position.z.toFixed(3)),
+    ]);
   },
 };

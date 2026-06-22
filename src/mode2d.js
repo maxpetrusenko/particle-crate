@@ -14,6 +14,7 @@ export function create2dMode({ canvas, hud }) {
     grid: new Map(),
     pointer: null,
     dripClock: 0,
+    activeFrames: 0,
     fps: 60,
     scale: 1,
     engine: { id: "loading", label: "loading" },
@@ -69,6 +70,7 @@ export function create2dMode({ canvas, hud }) {
 
   function setPointer(point, vx = 0, vy = 0) {
     state.pointer = { ...constrainPointer(point), vx, vy };
+    if (Math.hypot(vx, vy) > 0.01) activate(120);
   }
 
   function canvasPoint(event) {
@@ -81,10 +83,22 @@ export function create2dMode({ canvas, hud }) {
 
   function step(dt) {
     const startedAt = performance.now();
-    const details = engine.step(dt);
+    let details = { contacts: 0, obstacleHits: 0 };
+    if (state.pointer || state.activeFrames > 0) {
+      details = engine.step(dt);
+      if (!state.pointer && state.activeFrames > 0) state.activeFrames -= 1;
+      if (!state.pointer && state.activeFrames <= 0) {
+        state.activeFrames = 0;
+        details = engine.freeze();
+      }
+    }
     sampleStep(state.metrics, startedAt, details);
     state.fps = state.fps * 0.92 + (1 / Math.max(dt, 0.001)) * 0.08;
     render();
+  }
+
+  function activate(frames = 120) {
+    state.activeFrames = Math.max(state.activeFrames, frames);
   }
 
   function metrics() {
@@ -99,6 +113,8 @@ export function create2dMode({ canvas, hud }) {
       contacts: state.metrics.contacts,
       obstacleHits: state.metrics.obstacleHits,
       hasPointer: Boolean(state.pointer),
+      activeFrames: state.activeFrames,
+      driven: Boolean(state.pointer) || state.activeFrames > 0,
       leaks: containment.leaks,
     };
   }
@@ -112,6 +128,7 @@ export function create2dMode({ canvas, hud }) {
     event.preventDefault();
     canvas.setPointerCapture(event.pointerId);
     setPointer(canvasPoint(event), 0, 0);
+    activate(90);
   });
 
   canvas.addEventListener("pointermove", (event) => {
@@ -123,6 +140,7 @@ export function create2dMode({ canvas, hud }) {
 
   canvas.addEventListener("pointerup", (event) => {
     canvas.releasePointerCapture(event.pointerId);
+    state.pointer = null;
   });
 
   canvas.addEventListener("pointercancel", () => {
@@ -131,23 +149,47 @@ export function create2dMode({ canvas, hud }) {
 
   resize();
   engine.reset();
+  engine.freeze();
   render();
 
   return {
     resize,
     render,
     step,
-    reset: engine.reset,
-    dropBatch: engine.dropBatch,
+    reset() {
+      state.activeFrames = 0;
+      state.pointer = null;
+      const result = engine.reset();
+      engine.freeze();
+      render();
+      return result;
+    },
+    dropBatch(size) {
+      activate(180);
+      return engine.dropBatch(size);
+    },
     metrics,
+    samplePositions(limit = 16) {
+      return state.bodies.slice(0, limit).map((body) => [
+        Number(body.x.toFixed(2)),
+        Number(body.y.toFixed(2)),
+        Number(body.angle.toFixed(3)),
+      ]);
+    },
+    run(frames = 60) {
+      for (let i = 0; i < frames; i += 1) step(1 / 60);
+      return metrics();
+    },
     pushAt(x = 600, y = 650, vx = 24, vy = -16) {
       setPointer({ x, y }, vx, vy);
       for (let i = 0; i < 40; i += 1) step(1 / 60);
+      state.pointer = null;
       return metrics();
     },
     launchOut() {
       const bin = bounds();
       state.pointer = null;
+      activate(80);
       const body = state.bodies[0];
       body.x = bin.right - 8;
       body.y = bin.top - 90;

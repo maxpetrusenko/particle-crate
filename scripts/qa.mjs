@@ -36,6 +36,16 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function maxPositionDelta(before, after) {
+  let max = 0;
+  for (let i = 0; i < Math.min(before.length, after.length); i += 1) {
+    for (let j = 0; j < Math.min(before[i].length, after[i].length); j += 1) {
+      max = Math.max(max, Math.abs(before[i][j] - after[i][j]));
+    }
+  }
+  return max;
+}
+
 async function loadPage(page, errors) {
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text());
@@ -89,6 +99,18 @@ async function desktopProof(browser) {
   }));
   const orbit = await page.evaluate(() => window.__particleCrateDebug.orbit(0.42, 0.05));
   const legacyMode = await page.evaluate(() => window.__particleCrateDebug.setMode("3d"));
+  const idle3dStart = await page.evaluate(() => {
+    window.__particleCrateDebug.reset();
+    return {
+      metrics: window.__particleCrateDebug.metrics(),
+      positions: window.__particleCrateDebug.sample3dPositions(),
+    };
+  });
+  await page.waitForTimeout(700);
+  const idle3dAfter = await page.evaluate(() => ({
+    metrics: window.__particleCrateDebug.metrics(),
+    positions: window.__particleCrateDebug.sample3dPositions(),
+  }));
   const pulled = await page.evaluate(() => window.__particleCrateDebug.pullFirstBody(0, 4.5, 0));
   const stirred = await page.evaluate(() => window.__particleCrateDebug.stirFirstBody(1.4, 0.2));
   await page.waitForTimeout(1_800);
@@ -102,7 +124,9 @@ async function desktopProof(browser) {
     window.__particleCrateDebug.reset();
     return {
       start: window.__particleCrateDebug.metrics(),
+      startPositions: window.__particleCrateDebug.sampleFieldPositions(),
       after: window.__particleCrateDebug.runField(140),
+      afterPositions: window.__particleCrateDebug.sampleFieldPositions(),
     };
   });
   const fieldRim = await page.evaluate(() => {
@@ -129,6 +153,14 @@ async function desktopProof(browser) {
   const mode2d = await page.evaluate(() => window.__particleCrateDebug.setMode("2d"));
   await page.waitForTimeout(1_200);
   const canvas2d = await canvasProof(page, "#sim2d");
+  const idle2d = await page.evaluate(() => {
+    window.__particleCrateDebug.reset();
+    const start = window.__particleCrateDebug.sample2dPositions();
+    const before = window.__particleCrateDebug.metrics();
+    const afterMetrics = window.__particleCrateDebug.run2d(120);
+    const after = window.__particleCrateDebug.sample2dPositions();
+    return { before, afterMetrics, start, after };
+  });
   const push2d = await page.evaluate(() => window.__particleCrateDebug.push2dAt(620, 650, 26, -18));
   const launched2d = await page.evaluate(() => window.__particleCrateDebug.launch2dOut());
   const settled3d = await page.evaluate(() => window.__particleCrateDebug.settle3d(420));
@@ -141,12 +173,16 @@ async function desktopProof(browser) {
   assert(before.metrics.particles >= 560, `not enough particles: ${before.metrics.particles}`);
   assert(before.metrics.clusters >= 3, `missing locked voxel clusters: ${JSON.stringify(before.metrics)}`);
   assert(before.metrics.freeMaxY < 0.35, `free particles start as rain instead of a crate bed: ${JSON.stringify(before.metrics)}`);
+  assert(before.metrics.active === 0 && before.metrics.avgKE === 0 && !before.metrics.driven, `field moves before user input: ${JSON.stringify(before.metrics)}`);
   assert(before.metrics.outside === 0 && before.metrics.escapedLow === 0, `field starts outside crate: ${JSON.stringify(before.metrics)}`);
   assert(orbit.cameraMoved, `orbit did not move camera: ${JSON.stringify(orbit)}`);
   assert(legacyMode === "3d", `legacy 3D tab did not activate: ${legacyMode}`);
+  assert(idle3dStart.metrics.sleeping === idle3dStart.metrics.bodies, `3D starts awake without input: ${JSON.stringify(idle3dStart.metrics)}`);
+  assert(maxPositionDelta(idle3dStart.positions, idle3dAfter.positions) === 0, `3D moved without input: ${JSON.stringify({ start: idle3dStart, after: idle3dAfter, delta: maxPositionDelta(idle3dStart.positions, idle3dAfter.positions) })}`);
   assert(pulled.engine === "three-3d", `legacy 3D fallback did not run: ${JSON.stringify(pulled)}`);
   assert(stirred.stirEvents > 0, `legacy 3D stir did not hit bodies: ${JSON.stringify(stirred)}`);
   assert(fieldClosed.start.engine === "particle-field-3d", `field wrong engine: ${JSON.stringify(fieldClosed.start)}`);
+  assert(maxPositionDelta(fieldClosed.startPositions, fieldClosed.afterPositions) === 0, `closed idle field moved without input: ${JSON.stringify({ fieldClosed, delta: maxPositionDelta(fieldClosed.startPositions, fieldClosed.afterPositions) })}`);
   assert(fieldClosed.after.outside === 0, `closed field leaked on settle: ${JSON.stringify(fieldClosed)}`);
   assert(fieldClosed.after.escapedLow === 0, `closed field invalid escape: ${JSON.stringify(fieldClosed)}`);
   assert(fieldClosed.after.avgKE < 0.08, `closed field did not settle: ${JSON.stringify(fieldClosed)}`);
@@ -162,6 +198,8 @@ async function desktopProof(browser) {
   assert(fieldSpill.after.stepMs < 16, `field step too slow: ${JSON.stringify(fieldSpill.after)}`);
   assert(mode2d === "2d", `mode switch failed: ${mode2d}`);
   assert(canvas2d.contrast > 40 && canvas2d.colored > 120, `blank 2D canvas: ${JSON.stringify(canvas2d)}`);
+  assert(!idle2d.before.driven && !idle2d.afterMetrics.driven, `2D idle is still driven: ${JSON.stringify(idle2d)}`);
+  assert(maxPositionDelta(idle2d.start, idle2d.after) === 0, `2D moved without input: ${JSON.stringify({ idle2d, delta: maxPositionDelta(idle2d.start, idle2d.after) })}`);
   assert(push2d.engine === "js-discs-2d", `wrong 2D engine: ${JSON.stringify(push2d)}`);
   assert(push2d.bodies >= 180 && push2d.particles > push2d.bodies, `2D particles not running: ${JSON.stringify(push2d)}`);
   assert(push2d.obstacleHits > 0, `2D pointer shove did not hit bodies: ${JSON.stringify(push2d)}`);
@@ -171,7 +209,7 @@ async function desktopProof(browser) {
   assert(settled3d.sleeping > 360, `3D did not settle enough: ${JSON.stringify(settled3d)}`);
   await page.close();
 
-  return { firstCanvas, secondCanvas, before, orbit, legacyMode, pulled, stirred, after, fieldClosed, fieldRim, fieldSpill, mode2d, canvas2d, push2d, launched2d, settled3d };
+  return { firstCanvas, secondCanvas, before, orbit, legacyMode, idle3dStart, idle3dAfter, pulled, stirred, after, fieldClosed, fieldRim, fieldSpill, mode2d, canvas2d, idle2d, push2d, launched2d, settled3d };
 }
 
 async function mobileProof(browser) {

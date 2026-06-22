@@ -9,11 +9,12 @@ export function createHandmadeEngine({ state, config, palette, bounds }) {
     reset,
     dropBatch,
     step,
+    freeze,
     checkContainment,
     dispose() {},
   };
 
-  function makeBody(x, y, color) {
+  function makeBody(x, y, color, moving = false) {
     const wide = Math.random() > 0.34;
     const w = wide ? rand(23, 35) : rand(16, 24);
     const h = wide ? rand(10, 15) : rand(18, 28);
@@ -37,9 +38,9 @@ export function createHandmadeEngine({ state, config, palette, bounds }) {
       x,
       y,
       angle: rand(-0.8, 0.8),
-      vx: rand(-28, 28),
-      vy: rand(-18, 28),
-      omega: rand(-3.2, 3.2),
+      vx: moving ? rand(-28, 28) : 0,
+      vy: moving ? rand(-18, 28) : 0,
+      omega: moving ? rand(-3.2, 3.2) : 0,
       w,
       h,
       invMass: 1 / mass,
@@ -70,7 +71,7 @@ export function createHandmadeEngine({ state, config, palette, bounds }) {
     for (let i = 0; i < size; i += 1) {
       const x = rand(bin.left + 40, bin.right - 40);
       const y = rand(bin.top + 28, bin.top + 150);
-      state.bodies.push(makeBody(x, y, palette[(start + i) % palette.length]));
+      state.bodies.push(makeBody(x, y, palette[(start + i) % palette.length], true));
     }
     trimOverflow();
   }
@@ -289,12 +290,6 @@ export function createHandmadeEngine({ state, config, palette, bounds }) {
   }
 
   function step(dt) {
-    state.dripClock += dt;
-    if (state.dripClock > 0.72 && state.bodies.length < bodyLimit) {
-      state.dripClock = 0;
-      dropBatch(12);
-    }
-
     for (const body of state.bodies) {
       body.vy += config.gravity * dt;
       body.x += body.vx * dt;
@@ -318,6 +313,15 @@ export function createHandmadeEngine({ state, config, palette, bounds }) {
     }
 
     return { contacts, obstacleHits };
+  }
+
+  function freeze() {
+    for (const body of state.bodies) {
+      body.vx = 0;
+      body.vy = 0;
+      body.omega = 0;
+    }
+    return { contacts: 0, obstacleHits: 0 };
   }
 
   function checkContainment() {
